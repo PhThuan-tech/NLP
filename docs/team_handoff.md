@@ -112,6 +112,12 @@ RESUME_FROM_CHECKPOINT = ""
 Smoke LoRA gồm cả save và reload adapter. Chỉ chạy full khi
 `reports/reload_smoke.json` có `status: passed`.
 
+Profile Colab/T4 chung của nhóm dùng train batch 4, accumulation 4 (effective
+batch 16), eval batch 16 và subset cố định 128 mẫu để chọn checkpoint mỗi epoch.
+Sau training vẫn chạy toàn bộ dev đúng một lần. Không tự đổi các giá trị này
+giữa thành viên; nếu T4 báo OOM, lưu log và tạo profile/config mới thay vì sửa
+âm thầm config baseline.
+
 ### Run E2: full fine-tuning
 
 Chỉ chạy sau khi E0 và E1 đã hoàn tất. Đổi `MODE="full"`, dùng
@@ -143,8 +149,9 @@ reports/validation_metrics_by_category.json
 predictions/validation_predictions.jsonl
 ```
 
-LoRA/full còn phải có `best_model/` và `reports/reload_smoke.json`. Số dòng
-prediction phải bằng `evaluated_records` trong validation metrics.
+LoRA/full còn phải có `best_model/`, `reports/reload_smoke.json` và
+`reports/checkpoint_validation_subset.json`. Số dòng prediction phải bằng
+`evaluated_records` trong validation metrics.
 
 Tối thiểu phải giữ lại `resolved_config.json`, `run_manifest.json`, `reports/`,
 `predictions/validation_predictions.jsonl` và `best_model/` đối với LoRA/full.
@@ -204,7 +211,24 @@ kiện, số liệu và Điều/Khoản/Điểm.
 Chỉ sau E0–E2 mới thử context/HAN, glossary hoặc semantic dataset v3. Mỗi thay
 đổi đó là một nhánh thí nghiệm mới, không thay âm thầm baseline.
 
-## 10. Tài liệu chi tiết
+## 10. Lỗi thường gặp
+
+### Labels và logits khác chiều
+
+Nếu gặp lỗi dạng `index [batch, target_length, 1]` lớn hơn logits
+`[batch, source_length, vocab]`, không tự giảm target xuống 128. Kiểm tra phiên
+bản code có tạo `decoder_input_ids` từ labels trong
+`DynamicSeq2SeqCollator`. Baseline hiện tại giữ max source/target 512, audit
+đoạn dài trước và dùng dynamic padding.
+
+### PEFT báo `incompatible version of torchao`
+
+Một số Colab runtime cài sẵn `torchao 0.10.0`, nhưng PEFT 0.21 chỉ hỗ trợ bản
+trên 0.16. Baseline không dùng TorchAO/quantization; cell cài dependency trong
+`02_vinai_colab.ipynb` sẽ tự gỡ bản cũ trước khi chạy LoRA. Sau khi cập nhật
+notebook, nên tạo runtime mới và chạy tuần tự từ đầu.
+
+## 11. Tài liệu chi tiết
 
 - `docs/vinai_baseline_training.md`: kiến trúc và toàn bộ pipeline model.
 - `docs/data_preparation.md`: cách tạo, audit và version dữ liệu.

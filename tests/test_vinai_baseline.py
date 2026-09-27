@@ -2,12 +2,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
 from src.vinai_baseline.config import ExperimentConfig
 from src.vinai_baseline.compare_runs import comparable_rows
 from src.vinai_baseline.data import (
+    DynamicSeq2SeqCollator,
     JsonlCorpus,
     TokenizerAuditor,
     TranslationRecord,
@@ -27,6 +29,32 @@ class FakeTokenizer:
     def __call__(self, texts=None, *, text_target=None, **_kwargs):
         values = text_target if text_target is not None else texts
         return {"input_ids": [[0, *range(len(value.split())), 2] for value in values]}
+
+
+class FakeTensorTokenizer:
+    pad_token_id = 0
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, texts=None, *, text_target=None, **kwargs):
+        import torch
+
+        self.calls.append(kwargs)
+        values = text_target if text_target is not None else texts
+        lengths = [len(value.split()) + 2 for value in values]
+        width = max(lengths)
+        rows = [list(range(1, length + 1)) + [0] * (width - length) for length in lengths]
+        return {"input_ids": torch.tensor(rows, dtype=torch.long)}
+
+
+class FakeSeq2SeqModel:
+    def prepare_decoder_input_ids_from_labels(self, labels):
+        import torch
+
+        start = torch.full_like(labels[:, :1], 2)
+        shifted = labels[:, :-1].masked_fill(labels[:, :-1] == -100, 0)
+        return torch.cat([start, shifted], dim=1)
 
 
 def record(segment_id: str, source: str, target: str) -> TranslationRecord:
@@ -61,6 +89,11 @@ class ConfigTests(unittest.TestCase):
                 if config.training.mode != "none":
                     self.assertEqual(config.training.eval_strategy, "epoch")
                     self.assertEqual(config.training.save_strategy, "epoch")
+                    self.assertEqual(config.training.checkpoint_eval_samples, 128)
+                    self.assertEqual(config.training.per_device_eval_batch_size, 16)
+                if config.training.mode == "lora":
+                    self.assertEqual(config.training.per_device_train_batch_size, 4)
+                    self.assertEqual(config.training.gradient_accumulation_steps, 4)
 
     def test_frozen_dataset_contract_matches_both_directions(self):
         for name in ("en2vi_lora.json", "vi2en_lora.json"):
@@ -133,6 +166,26 @@ class CorpusTests(unittest.TestCase):
 
 
 class TokenAuditTests(unittest.TestCase):
+    def test_collator_decoder_inputs_match_target_length_for_label_smoothing(self):
+        tokenizer = FakeTensorTokenizer()
+        collator = DynamicSeq2SeqCollator(
+            tokenizer,
+            model=FakeSeq2SeqModel(),
+            max_source_length=512,
+            max_target_length=512,
+            truncate=False,
+            pad_to_multiple_of=None,
+        )
+        batch = collator(
+            [
+                {"source_text": "short source", "target_text": "a much longer target sequence"},
+                {"source_text": "another source", "target_text": "short target"},
+            ]
+        )
+        self.assertEqual(batch["labels"].shape, batch["decoder_input_ids"].shape)
+        self.assertNotEqual(batch["input_ids"].shape[1], batch["labels"].shape[1])
+        self.assertTrue(all("max_length" not in call for call in tokenizer.calls))
+
     def test_drop_policy_reports_and_removes_overlength_pair(self):
         values = [
             record("short", "one two", "một hai"),
@@ -252,15 +305,44 @@ class ComparisonTests(unittest.TestCase):
 
 
 class OutputSafetyTests(unittest.TestCase):
+    def test_checkpoint_validation_subset_is_fixed_by_seed(self):
+        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        records = [
+            record(f"segment-{index:04d}", f"source {index}", f"target {index}")
+            for index in range(200)
+        ]
+        validation = SimpleNamespace(records=records)
+        first_dataset, first_report = BaselineRunner(
+            config
+        )._checkpoint_validation_dataset(validation)
+        second_dataset, second_report = BaselineRunner(
+            config
+        )._checkpoint_validation_dataset(validation)
+        self.assertEqual(len(first_dataset), 128)
+        self.assertEqual(first_report, second_report)
+        self.assertEqual(
+            [item.segment_id for item in first_dataset.records],
+            [item.segment_id for item in second_dataset.records],
+        )
+
+    def test_colab_training_uses_compact_logs_instead_of_tqdm(self):
+        runner_source = Path("src/vinai_baseline/runner.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("disable_tqdm=True", runner_source)
+        self.assertIn("CompactProgressCallback", runner_source)
+
     def test_epoch_strategy_has_three_validation_runs(self):
         config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
         plan = BaselineRunner._training_plan(config, 18_316, 1_877)
         self.assertEqual(plan["effective_batch_size_one_gpu"], 16)
         self.assertEqual(plan["planned_optimizer_updates"], 3_435)
         self.assertEqual(plan["evaluation_runs_during_training"], 3)
+        self.assertEqual(plan["checkpoint_validation_records"], 128)
         self.assertEqual(
-            plan["planned_generated_validation_records_during_training"], 5_631
+            plan["planned_generated_validation_records_during_training"], 384
         )
+        self.assertEqual(plan["planned_final_validation_records"], 1_877)
 
     def test_completed_output_requires_a_new_run_id(self):
         config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")

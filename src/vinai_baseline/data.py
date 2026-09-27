@@ -270,12 +270,14 @@ class DynamicSeq2SeqCollator:
         self,
         tokenizer: Any,
         *,
+        model: Any,
         max_source_length: int,
         max_target_length: int,
         truncate: bool,
         pad_to_multiple_of: int | None = 8,
     ) -> None:
         self.tokenizer = tokenizer
+        self.model = model
         self.max_source_length = max_source_length
         self.max_target_length = max_target_length
         self.truncate = truncate
@@ -286,25 +288,31 @@ class DynamicSeq2SeqCollator:
 
         sources = [item["source_text"] for item in features]
         targets = [item["target_text"] for item in features]
-        model_inputs = self.tokenizer(
-            sources,
-            max_length=self.max_source_length,
-            truncation=self.truncate,
-            padding=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-            return_tensors="pt",
-        )
-        target_batch = self.tokenizer(
-            text_target=targets,
-            max_length=self.max_target_length,
-            truncation=self.truncate,
-            padding=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-            return_tensors="pt",
-        )
+        source_options: dict[str, Any] = {
+            "truncation": self.truncate,
+            "padding": True,
+            "pad_to_multiple_of": self.pad_to_multiple_of,
+            "return_tensors": "pt",
+        }
+        target_options = dict(source_options)
+        if self.truncate:
+            source_options["max_length"] = self.max_source_length
+            target_options["max_length"] = self.max_target_length
+        model_inputs = self.tokenizer(sources, **source_options)
+        target_batch = self.tokenizer(text_target=targets, **target_options)
         labels = target_batch["input_ids"]
         labels = labels.masked_fill(labels == self.tokenizer.pad_token_id, -100)
         model_inputs["labels"] = labels.to(dtype=torch.long)
+        prepare_decoder_inputs = getattr(
+            self.model, "prepare_decoder_input_ids_from_labels", None
+        )
+        if not callable(prepare_decoder_inputs):
+            raise RuntimeError(
+                "The seq2seq model cannot create decoder_input_ids from labels"
+            )
+        model_inputs["decoder_input_ids"] = prepare_decoder_inputs(
+            labels=model_inputs["labels"]
+        )
         return model_inputs
 
 

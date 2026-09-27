@@ -132,6 +132,7 @@ class TrainingConfig:
     logging_steps: int = 25
     save_total_limit: int = 2
     dataloader_num_workers: int = 2
+    checkpoint_eval_samples: int | None = None
     early_stopping_patience: int = 2
     metric_for_best_model: str = "chrf"
     greater_is_better: bool = True
@@ -176,6 +177,11 @@ class TrainingConfig:
                 raise ValueError("Early stopping requires evaluation")
         if self.dataloader_num_workers < 0:
             raise ValueError("dataloader_num_workers cannot be negative")
+        if (
+            self.checkpoint_eval_samples is not None
+            and self.checkpoint_eval_samples < 1
+        ):
+            raise ValueError("training.checkpoint_eval_samples must be positive")
 
 
 @dataclass

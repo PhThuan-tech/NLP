@@ -125,8 +125,13 @@ python -m src.vinai_baseline.cli evaluate \
 LoRA thêm các ma trận hạng thấp vào `q_proj` và `v_proj` của attention; base
 model được đóng băng. Cấu hình khởi đầu là rank 16, alpha 32, dropout 0.05,
 learning rate `1e-4`, effective batch size 16 và 3 epoch. Eval/save chạy cuối
-mỗi epoch thay vì mỗi 250 optimizer step, giảm mạnh generation trên dev mà
-không đổi cấu hình suy luận cuối.
+mỗi epoch trên một subset cố định 128 mẫu để chọn checkpoint. Sau training,
+checkpoint tốt nhất vẫn được đánh giá đúng một lần trên toàn bộ dev set.
+
+Profile T4 dùng train micro-batch 4 và gradient accumulation 4, nên effective
+batch vẫn là 16 như baseline cũ. Eval batch tăng từ 2 lên 16. Các thay đổi này
+tăng mức sử dụng GPU nhưng không đổi seed, số epoch, learning rate, dữ liệu hay
+cấu hình generation.
 
 Lợi ích: ít tham số cần cập nhật, dùng ít VRAM hơn full fine-tuning, checkpoint
 nhỏ và phù hợp để thử nhiều giả thuyết trên GPU T4/P100 16 GB. `best_model/`
@@ -174,6 +179,19 @@ re-segment ở ranh giới câu hoặc khoản nếu tỷ lệ đáng kể.
 
 Dynamic padding chỉ pad đến đoạn dài nhất trong từng batch, giảm token thừa so
 với pad toàn bộ dữ liệu đến 512.
+
+Subset chọn checkpoint không lấy 128 dòng đầu. Các mẫu được xếp hạng bằng
+`SHA256(seed:segment_id)` với seed 67, nên ổn định giữa thành viên và không phụ
+thuộc thứ tự đọc file. Fingerprint và phân bố category được lưu tại
+`reports/checkpoint_validation_subset.json`. Metric báo cáo cuối luôn lấy trên
+toàn bộ dev đã qua token audit, không lấy trên subset này.
+
+Source và target được pad độc lập vì độ dài có thể khác nhau. Collator sau đó
+gọi `model.prepare_decoder_input_ids_from_labels(...)` để decoder input luôn có
+cùng chiều sequence với labels. Đây là điều bắt buộc khi dùng label smoothing:
+Trainer có thể tách labels trước khi gọi model, nên không được để model tự tạo
+decoder input theo chiều source. Không ép target về 128; giới hạn chuẩn vẫn lấy
+từ config (512) và chính sách `drop`/`truncate` đã khai báo.
 
 ## 6. Metric và cách chọn model
 

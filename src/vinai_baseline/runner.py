@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import hashlib
 import json
 import math
 import platform
@@ -19,6 +20,7 @@ from .data import (
     JsonlCorpus,
     PreparedCorpus,
     TokenizerAuditor,
+    TranslationDataset,
     sha256_file,
     write_json,
     write_jsonl,
@@ -38,6 +40,7 @@ class BaselineRunner:
         self.checkpoints_dir = self.output_dir / "checkpoints"
         self.best_model_dir = self.output_dir / "best_model"
         self.factory = VinAIModelFactory(config)
+        self.checkpoint_selection_report: dict[str, Any] | None = None
 
     @staticmethod
     def _status(message: str) -> None:
@@ -294,7 +297,10 @@ class BaselineRunner:
 
     @staticmethod
     def _training_plan(
-        config: ExperimentConfig, train_size: int, validation_size: int
+        config: ExperimentConfig,
+        train_size: int,
+        validation_size: int,
+        checkpoint_validation_size: int | None = None,
     ) -> dict[str, Any]:
         train = config.training
         micro_batches = math.ceil(train_size / train.per_device_train_batch_size)
@@ -308,9 +314,16 @@ class BaselineRunner:
             evaluation_runs = total_updates // train.eval_steps
         else:
             evaluation_runs = 0
+        if checkpoint_validation_size is None:
+            requested = config.training.checkpoint_eval_samples
+            checkpoint_validation_size = min(
+                requested or validation_size,
+                validation_size,
+            )
         return {
             "training_records": train_size,
             "validation_records": validation_size,
+            "checkpoint_validation_records": checkpoint_validation_size,
             "epochs": train.epochs,
             "micro_batches_per_epoch": micro_batches,
             "optimizer_updates_per_epoch": updates_per_epoch,
@@ -321,10 +334,44 @@ class BaselineRunner:
             ),
             "evaluation_runs_during_training": evaluation_runs,
             "planned_generated_validation_records_during_training": (
-                evaluation_runs * validation_size
+                evaluation_runs * checkpoint_validation_size
             ),
+            "planned_final_validation_records": validation_size,
             "warmup_steps": BaselineRunner._warmup_steps(config, train_size),
         }
+
+    def _checkpoint_validation_dataset(
+        self,
+        validation: PreparedCorpus,
+    ) -> tuple[TranslationDataset, dict[str, Any]]:
+        """Select a stable dev subset for checkpoint choice; final eval stays full."""
+        requested = self.config.training.checkpoint_eval_samples
+        count = min(requested or len(validation.records), len(validation.records))
+        ranked = sorted(
+            validation.records,
+            key=lambda record: hashlib.sha256(
+                f"{self.config.seed}:{record.segment_id}".encode("utf-8")
+            ).digest(),
+        )
+        selected = ranked[:count]
+        selected_ids = sorted(record.segment_id for record in selected)
+        fingerprint = hashlib.sha256(
+            "\n".join(selected_ids).encode("utf-8")
+        ).hexdigest()
+        category_counts: dict[str, int] = {}
+        for record in selected:
+            category = record.category or "unknown"
+            category_counts[category] = category_counts.get(category, 0) + 1
+        report = {
+            "selection_method": "sha256(seed:segment_id)",
+            "seed": self.config.seed,
+            "requested_records": requested,
+            "selected_records": len(selected),
+            "full_validation_records": len(validation.records),
+            "segment_ids_sha256": fingerprint,
+            "category_counts": dict(sorted(category_counts.items())),
+        }
+        return TranslationDataset(selected), report
 
     def _training_arguments(self, *, train_size: int | None, do_train: bool) -> Any:
         from transformers import Seq2SeqTrainingArguments
@@ -364,9 +411,12 @@ class BaselineRunner:
             generation_num_beams=self.config.generation.num_beams,
             dataloader_num_workers=train.dataloader_num_workers,
             dataloader_pin_memory=True,
+            dataloader_persistent_workers=train.dataloader_num_workers > 0,
             remove_unused_columns=False,
             report_to=[],
-            disable_tqdm=False,
+            # Colab renders tqdm as many duplicated lines. A compact callback below
+            # reports epoch/step, elapsed time, and ETA instead.
+            disable_tqdm=True,
             logging_first_step=True,
             seed=self.config.seed,
             data_seed=self.config.seed,
@@ -384,17 +434,155 @@ class BaselineRunner:
         tokenizer: Any,
         train_corpus: PreparedCorpus | None,
         validation_corpus: PreparedCorpus,
+        checkpoint_validation_dataset: TranslationDataset | None = None,
     ) -> Any:
-        from transformers import EarlyStoppingCallback, Seq2SeqTrainer
+        from transformers import (
+            EarlyStoppingCallback,
+            PrinterCallback,
+            Seq2SeqTrainer,
+            TrainerCallback,
+        )
+
+        class CompactProgressCallback(TrainerCallback):
+            """One-line Colab-friendly training progress with epoch timing."""
+
+            def __init__(self) -> None:
+                self.training_started: float | None = None
+                self.epoch_started: float | None = None
+                self.epoch_durations: list[float] = []
+                self.pending_epoch_summary = False
+                self.prediction_step = 0
+                self.prediction_total = 0
+                self.prediction_started: float | None = None
+
+            @staticmethod
+            def _duration(seconds: float) -> str:
+                total = max(0, round(seconds))
+                hours, remainder = divmod(total, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+            @staticmethod
+            def _epoch_label(state: Any, args: Any) -> str:
+                current = float(state.epoch or 0.0)
+                maximum = float(args.num_train_epochs)
+                return f"{current:.2f}/{maximum:g}"
+
+            def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+                self.training_started = time.perf_counter()
+                self.epoch_durations = []
+                self.pending_epoch_summary = False
+                BaselineRunner._status(
+                    f"TRAIN epoch 0/{args.num_train_epochs:g} | "
+                    f"step {state.global_step}/{state.max_steps}"
+                )
+
+            def on_epoch_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+                self.epoch_started = time.perf_counter()
+                current = min(
+                    math.floor(float(state.epoch or 0.0)) + 1,
+                    math.ceil(args.num_train_epochs),
+                )
+                BaselineRunner._status(
+                    f"EPOCH {current}/{math.ceil(args.num_train_epochs)} started"
+                )
+
+            def on_log(self, args: Any, state: Any, control: Any, logs: dict[str, Any] | None = None, **kwargs: Any) -> None:
+                logs = logs or {}
+                if "loss" not in logs:
+                    return
+                loss = float(logs["loss"])
+                learning_rate = float(logs.get("learning_rate", 0.0))
+                BaselineRunner._status(
+                    f"TRAIN epoch {self._epoch_label(state, args)} | "
+                    f"step {state.global_step}/{state.max_steps} | "
+                    f"loss {loss:.4f} | lr {learning_rate:.3g}"
+                )
+
+            def on_evaluate(self, args: Any, state: Any, control: Any, metrics: dict[str, Any] | None = None, **kwargs: Any) -> None:
+                metrics = metrics or {}
+                chrf = metrics.get("eval_chrf")
+                bleu = metrics.get("eval_bleu")
+                scores = []
+                if chrf is not None:
+                    scores.append(f"chrF++ {float(chrf):.3f}")
+                if bleu is not None:
+                    scores.append(f"BLEU {float(bleu):.3f}")
+                suffix = " | " + " | ".join(scores) if scores else ""
+                BaselineRunner._status(
+                    f"EVAL epoch {self._epoch_label(state, args)}{suffix}"
+                )
+                if self.pending_epoch_summary:
+                    self._print_epoch_summary(args, state)
+
+            def begin_prediction(self) -> None:
+                """Start timing before the first generation batch."""
+                self.prediction_step = 0
+                self.prediction_total = 0
+                self.prediction_started = time.perf_counter()
+
+            def on_prediction_step(
+                self,
+                args: Any,
+                state: Any,
+                control: Any,
+                eval_dataloader: Any | None = None,
+                **kwargs: Any,
+            ) -> None:
+                total = len(eval_dataloader) if eval_dataloader is not None else 0
+                if self.prediction_started is None or (
+                    self.prediction_total and self.prediction_step >= self.prediction_total
+                ):
+                    self.begin_prediction()
+                self.prediction_total = total
+                self.prediction_step += 1
+                interval = max(1, math.ceil(max(1, total) / 10))
+                if self.prediction_step != total and self.prediction_step % interval:
+                    return
+                elapsed = time.perf_counter() - (self.prediction_started or time.perf_counter())
+                rate = elapsed / max(1, self.prediction_step)
+                eta = rate * max(0, total - self.prediction_step)
+                BaselineRunner._status(
+                    f"GENERATE batch {self.prediction_step}/{total} | "
+                    f"elapsed {self._duration(elapsed)} | ETA {self._duration(eta)}"
+                )
+
+            def on_epoch_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+                strategy = getattr(args.eval_strategy, "value", args.eval_strategy)
+                if strategy == "epoch":
+                    # Transformers evaluates immediately after on_epoch_end. Delay
+                    # the summary so "epoch time" includes that validation pass.
+                    self.pending_epoch_summary = True
+                    self.begin_prediction()
+                else:
+                    self._print_epoch_summary(args, state)
+
+            def _print_epoch_summary(self, args: Any, state: Any) -> None:
+                now = time.perf_counter()
+                epoch_seconds = now - (self.epoch_started or now)
+                self.epoch_durations.append(epoch_seconds)
+                total_seconds = now - (self.training_started or now)
+                completed = max(1, math.ceil(float(state.epoch or 0.0)))
+                maximum = math.ceil(float(args.num_train_epochs))
+                remaining = max(0, maximum - completed)
+                mean_epoch = sum(self.epoch_durations) / len(self.epoch_durations)
+                BaselineRunner._status(
+                    f"EPOCH {completed}/{maximum} completed | "
+                    f"epoch time {self._duration(epoch_seconds)} | "
+                    f"elapsed {self._duration(total_seconds)} | "
+                    f"ETA {self._duration(mean_epoch * remaining)}"
+                )
+                self.pending_epoch_summary = False
 
         metric_suite = TranslationMetricSuite(tokenizer)
         collator = DynamicSeq2SeqCollator(
             tokenizer,
+            model=model,
             max_source_length=self.config.data.max_source_length,
             max_target_length=self.config.data.max_target_length,
             truncate=self.config.data.overlength_policy == "truncate",
         )
-        callbacks = []
+        callbacks = [CompactProgressCallback()]
         do_train = train_corpus is not None
         if do_train and self.config.training.early_stopping_patience > 0:
             callbacks.append(
@@ -404,19 +592,25 @@ class BaselineRunner:
                     )
                 )
             )
-        return Seq2SeqTrainer(
+        trainer = Seq2SeqTrainer(
             model=model,
             args=self._training_arguments(
                 train_size=len(train_corpus.records) if train_corpus else None,
                 do_train=do_train,
             ),
             train_dataset=train_corpus.dataset if train_corpus else None,
-            eval_dataset=validation_corpus.dataset,
+            eval_dataset=(
+                checkpoint_validation_dataset or validation_corpus.dataset
+            ),
             data_collator=collator,
             processing_class=tokenizer,
             compute_metrics=metric_suite,
             callbacks=callbacks,
         )
+        # disable_tqdm=True normally installs PrinterCallback, which dumps raw
+        # dictionaries. Keep only the compact progress callback above.
+        trainer.remove_callback(PrinterCallback)
+        return trainer
 
     def evaluate(self) -> dict[str, Any]:
         """Run the untouched pretrained model on the frozen validation set."""
@@ -527,6 +721,7 @@ class BaselineRunner:
             f"{validation.audit.total} records"
         )
         train_corpus = None
+        checkpoint_validation_dataset = None
         if do_train:
             self._status("Loading and auditing the training split...")
             train_corpus = self._prepare_records(
@@ -536,16 +731,29 @@ class BaselineRunner:
                 f"Training data ready: retained {train_corpus.audit.retained}/"
                 f"{train_corpus.audit.total} records"
             )
+            (
+                checkpoint_validation_dataset,
+                self.checkpoint_selection_report,
+            ) = self._checkpoint_validation_dataset(validation)
+            write_json(
+                self.reports_dir / "checkpoint_validation_subset.json",
+                self.checkpoint_selection_report,
+            )
             plan = self._training_plan(
-                self.config, len(train_corpus.records), len(validation.records)
+                self.config,
+                len(train_corpus.records),
+                len(validation.records),
+                len(checkpoint_validation_dataset),
             )
             write_json(self.reports_dir / "training_plan.json", plan)
             self._status(
                 "Training plan: "
                 f"{plan['planned_optimizer_updates']} optimizer updates, "
                 f"effective batch {plan['effective_batch_size_one_gpu']}, "
-                f"{plan['evaluation_runs_during_training']} validation runs. "
-                "Trainer's progress bar shows elapsed time and ETA."
+                f"{plan['evaluation_runs_during_training']} checkpoint evaluations "
+                f"on {plan['checkpoint_validation_records']} fixed records, then "
+                f"one final evaluation on {plan['validation_records']} records. "
+                "Compact logs report current/max epoch, timing, and ETA."
             )
 
         self._status("Loading model weights; the first download may take several minutes...")
@@ -561,13 +769,14 @@ class BaselineRunner:
             tokenizer=tokenizer,
             train_corpus=train_corpus,
             validation_corpus=validation,
+            checkpoint_validation_dataset=checkpoint_validation_dataset,
         )
 
         train_metrics: dict[str, Any] = {}
         if do_train:
             self._status(
                 f"Starting training on {len(train_corpus.records)} records. "
-                "The progress bar reports steps, loss, and epoch."
+                "Progress logs report epoch, step, loss, elapsed time, and ETA."
             )
             result = trainer.train(
                 resume_from_checkpoint=self.config.training.resume_from_checkpoint
@@ -588,8 +797,12 @@ class BaselineRunner:
             torch.cuda.synchronize()
         self._status(
             f"Generating translations for {len(validation.records)} validation records. "
-            "The progress bar reports completed batches."
+            "This final generation can take several minutes."
         )
+        for callback in trainer.callback_handler.callbacks:
+            begin_prediction = getattr(callback, "begin_prediction", None)
+            if begin_prediction is not None:
+                begin_prediction()
         prediction_output = trainer.predict(
             validation.dataset,
             metric_key_prefix="validation",
@@ -698,6 +911,8 @@ class BaselineRunner:
             "gpu": gpu_name,
             "packages": packages,
             "generation_config": self.config.generation.__dict__,
+            "training_config": self.config.training.__dict__,
+            "checkpoint_validation": self.checkpoint_selection_report,
             "metric_code_sha256": sha256_file(Path(__file__).with_name("metrics.py")),
             "data_files": self._data_manifest(),
             "train_metrics": train_metrics,

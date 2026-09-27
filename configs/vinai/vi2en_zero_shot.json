@@ -24,6 +24,7 @@
   },
   "training": {
     "mode": "none",
+    "per_device_eval_batch_size": 16,
     "gradient_checkpointing": false,
     "fp16": true,
     "bf16": false,
