@@ -110,11 +110,18 @@ rơi vào hai split khác nhau.
 ### 4. Chia train/dev
 
 Split được thực hiện trên document và duplicate group trước segmentation.
-Pipeline cố giữ tỷ lệ category gần với dữ liệu gốc. Seed mặc định là `42`, nên
-cùng dữ liệu và cấu hình sẽ tạo cùng split.
+Pipeline dùng `sklearn.model_selection.train_test_split` trên danh sách
+`duplicate_group`, với `stratify=category` và `random_state=seed`. Seed mặc định
+là `67`, nên cùng dữ liệu, phiên bản scikit-learn và cấu hình sẽ tạo cùng split.
+Không split trực tiếp các segment vì làm vậy có thể đưa các đoạn của cùng một
+document vào cả train và dev, gây data leakage.
 
 Public test không tham gia split và không được gộp vào train. Target trong
 public test chỉ phục vụ đánh giá và chọn hệ thống.
+
+> **Dataset hiện hành:** `artifacts/processed_sklearn_seed67` đã được tạo lại
+> bằng split scikit-learn với seed `67`. Đây là dataset mặc định cho baseline;
+> không trộn với các artifact dùng thuật toán split hoặc seed cũ.
 
 ### 5. Tạo logical block
 
@@ -221,28 +228,35 @@ Từ project root:
 
 ```powershell
 .\NLP_venv\Scripts\python.exe -m unittest discover -s tests -v
-.\NLP_venv\Scripts\python.exe -m src.data.prepare --project-root .
+.\NLP_venv\Scripts\python.exe -m src.data.prepare `
+  --project-root . `
+  --output-dir artifacts/processed_sklearn_seed67 `
+  --seed 67
 ```
 
-Cài dependency và lọc semantic (nên chạy trên GPU nếu có):
+Có thể chạy semantic filtering như một thí nghiệm riêng (nên dùng GPU):
 
 ```powershell
 pip install -r requirements-semantic.txt
 .\NLP_venv\Scripts\python.exe -m src.data.semantic_filter `
-  --input-dir artifacts/processed `
-  --output-dir artifacts/semantic `
+  --input-dir artifacts/processed_sklearn_seed67 `
+  --output-dir artifacts/semantic_sklearn_seed67 `
   --model-name sentence-transformers/LaBSE `
   --minimum-similarity 0.72
 ```
 
 Ngưỡng `0.72` là điểm khởi đầu, không phải hằng số tối ưu. Hãy lấy mẫu thủ
-công theo các khoảng similarity rồi chọn threshold trên dev. Các file thực sự
-dùng để train sau bước này nằm trong `artifacts/semantic/`.
+công theo các khoảng similarity trước khi quyết định dùng dataset thử nghiệm
+này. Baseline hiện tại vẫn train từ `artifacts/processed_sklearn_seed67/`.
 
 Chạy lại và thay các file được pipeline sinh ra:
 
 ```powershell
-.\NLP_venv\Scripts\python.exe -m src.data.prepare --project-root . --overwrite
+.\NLP_venv\Scripts\python.exe -m src.data.prepare `
+  --project-root . `
+  --output-dir artifacts/processed_sklearn_seed67 `
+  --seed 67 `
+  --overwrite
 ```
 
 Có thể điều chỉnh quality gate:
@@ -250,6 +264,8 @@ Có thể điều chỉnh quality gate:
 ```powershell
 .\NLP_venv\Scripts\python.exe -m src.data.prepare `
   --project-root . `
+  --output-dir artifacts/processed_sklearn_seed67 `
+  --seed 67 `
   --dev-ratio 0.10 `
   --minimum-alignment-score 0.75 `
   --maximum-chunk-words 400 `
@@ -261,12 +277,12 @@ Có thể điều chỉnh quality gate:
 - Dữ liệu gốc: 854 document train và 50 document public test.
 - Loại 17 cặp tài liệu trùng hoàn toàn.
 - Còn 837 document, gồm 753 train và 84 dev.
-- Sinh 18.660 segment train cho mỗi chiều dịch.
-- Sinh 2.041 segment dev cho mỗi chiều dịch.
+- Sinh 18.802 segment train cho mỗi chiều dịch.
+- Sinh 1.899 segment dev cho mỗi chiều dịch.
 - Sinh 1.212 segment public test cho mỗi chiều dịch.
 - Không phát hiện exact document overlap giữa train và public test.
 
-## Ý nghĩa các file trong `artifacts/processed`
+## Ý nghĩa các file trong `artifacts/processed_sklearn_seed67`
 
 ### Dữ liệu document-level
 
@@ -325,20 +341,20 @@ Kiểm toán dữ liệu:
   alignment_by_category.csv
   rejected_alignments.jsonl
 
-Chạy semantic filtering:
-  artifacts/processed/segments_<split>_en2vi.jsonl
+Chạy semantic filtering tùy chọn:
+  artifacts/processed_sklearn_seed67/segments_<split>_en2vi.jsonl
 
 Fine-tuning:
-  artifacts/semantic/segments_train_en2vi.jsonl
-  artifacts/semantic/segments_train_vi2en.jsonl
+  artifacts/processed_sklearn_seed67/segments_train_en2vi.jsonl
+  artifacts/processed_sklearn_seed67/segments_train_vi2en.jsonl
 
 Validation:
-  artifacts/semantic/segments_dev_en2vi.jsonl
-  artifacts/semantic/segments_dev_vi2en.jsonl
+  artifacts/processed_sklearn_seed67/segments_dev_en2vi.jsonl
+  artifacts/processed_sklearn_seed67/segments_dev_vi2en.jsonl
 
 Public evaluation:
-  artifacts/semantic/segments_public_test_en2vi.jsonl
-  artifacts/semantic/segments_public_test_vi2en.jsonl
+  artifacts/processed_sklearn_seed67/segments_public_test_en2vi.jsonl
+  artifacts/processed_sklearn_seed67/segments_public_test_vi2en.jsonl
 ```
 
 ## Lưu ý trước khi huấn luyện
@@ -356,8 +372,7 @@ Public evaluation:
 - [ ] Đã xem phân bố document và segment theo category.
 - [ ] Đã kiểm tra các document có rejection rate cao nhất.
 - [ ] Đã lấy mẫu alignment ở nhiều khoảng structural score.
-- [ ] Đã chạy semantic filtering.
-- [ ] Đã lấy mẫu thủ công quanh semantic threshold.
+- [ ] Nếu dùng biến thể semantic: đã chạy lọc và lấy mẫu thủ công quanh threshold.
 - [ ] Đã phân tích tokenizer của model được chọn.
 - [ ] Không có target bị truncate âm thầm.
 - [ ] Đã lưu manifest, config, seed và checksum của dataset version.
@@ -387,6 +402,7 @@ Public evaluation:
 | Duplicate | Bản ghi trùng toàn bộ hoặc trùng một phía. |
 | Data leakage | Dữ liệu dev/test xuất hiện trong train, làm metric cao giả tạo. |
 | Stratified split | Chia dữ liệu sao cho tỷ lệ category giữa các split gần nhau. |
+| `random_state` | Seed truyền cho scikit-learn để phép chia có thể tái lập. |
 | Hash | Dấu vân tay số của nội dung, dùng phát hiện trùng và kiểm tra toàn vẹn. |
 | Unicode NFC | Dạng chuẩn Unicode giúp cùng một chữ có biểu diễn nhất quán. |
 | JSONL | Mỗi dòng là một JSON object, phù hợp xử lý tuần tự dữ liệu lớn. |

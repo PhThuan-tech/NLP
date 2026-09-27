@@ -73,6 +73,9 @@ class AlignmentTests(unittest.TestCase):
 
 
 class SplitTests(unittest.TestCase):
+    def test_default_split_seed_is_67(self) -> None:
+        self.assertEqual(PreparationConfig().seed, 67)
+
     def test_duplicate_source_stays_in_one_split_and_split_is_deterministic(self) -> None:
         rows = []
         for category in ["A", "B"]:
@@ -103,6 +106,39 @@ class SplitTests(unittest.TestCase):
         ]
         self.assertEqual(duplicate_source.nunique(), 1)
         self.assertEqual(set(first["split"]), {"train", "dev"})
+
+    def test_different_seed_changes_group_selection_without_leakage(self) -> None:
+        rows = []
+        for category in ["A", "B"]:
+            for index in range(30):
+                rows.append(
+                    {
+                        "sample_id": f"{category}/{index}",
+                        "category": category,
+                        "english_markdown": f"English {category} {index}",
+                        "vietnamese_markdown": f"Vietnamese {category} {index}",
+                    }
+                )
+        frame = add_hashes(pd.DataFrame(rows))
+        seed_7 = stratified_document_split(
+            frame, PreparationConfig(seed=7, dev_ratio=0.2)
+        )
+        seed_19 = stratified_document_split(
+            frame, PreparationConfig(seed=19, dev_ratio=0.2)
+        )
+        dev_7 = set(seed_7.loc[seed_7["split"] == "dev", "sample_id"])
+        dev_19 = set(seed_19.loc[seed_19["split"] == "dev", "sample_id"])
+        self.assertNotEqual(dev_7, dev_19)
+        self.assertEqual(len(dev_7), 12)
+        self.assertEqual(len(dev_19), 12)
+        for split_frame in [seed_7, seed_19]:
+            counts = split_frame.groupby(["split", "category"]).size()
+            self.assertEqual(counts.to_dict(), {
+                ("dev", "A"): 6,
+                ("dev", "B"): 6,
+                ("train", "A"): 24,
+                ("train", "B"): 24,
+            })
 
 
 class FakeEncoder:

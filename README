@@ -1,1 +1,26 @@
-repo for NLP
+# Legal English–Vietnamese Machine Translation
+
+Repository xây dựng pipeline dịch máy Anh–Việt/Việt–Anh cho văn bản pháp luật.
+Dữ liệu huấn luyện hiện tại đã được chia ở cấp document bằng
+`sklearn.model_selection.train_test_split` với seed `67`, sau đó qua structural
+alignment. Baseline dùng `vinai/vinai-translate-en2vi-v2` và
+`vinai/vinai-translate-vi2en-v2`.
+
+## Bắt đầu nhanh
+
+```bash
+pip install -r requirements-training.txt
+python -m src.vinai_baseline.cli audit --config configs/vinai/en2vi_lora.json
+python -m src.vinai_baseline.cli train --config configs/vinai/en2vi_lora.json
+```
+
+Trên GPU cloud, dùng một trong hai notebook:
+
+- `notebooks/02_vinai_colab.ipynb`
+- `notebooks/03_vinai_kaggle.ipynb`
+
+Hướng dẫn kiến trúc, cấu hình, quy trình chạy, output và xử lý lỗi nằm tại
+`docs/vinai_baseline_training.md`. Roadmap tổng thể nằm tại `docs/next_steps.md`.
+
+Không dùng `segments_public_test_*` để train, early stopping hoặc chọn
+hyperparameter.

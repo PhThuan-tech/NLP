@@ -3,8 +3,9 @@
 ## Mục tiêu
 
 Sau structural preprocessing, cần hoàn thiện chất lượng dữ liệu, xây baseline,
-fine-tune model, đánh giá ở cấp document và đóng gói submission. Không nên
-fine-tune trực tiếp từ `artifacts/processed` trước khi chạy semantic filtering.
+fine-tune model, đánh giá ở cấp document và đóng gói submission. Dataset dùng
+cho baseline hiện tại là `artifacts/processed_sklearn_seed67`, được chia ở cấp
+document bằng scikit-learn với seed `67`.
 
 Tài liệu này là roadmap thực thi cho cả nhóm. Mỗi giai đoạn có mục đích, đầu ra
 và điều kiện hoàn thành. Chỉ nên chuyển bước khi đầu ra trước đó đã được kiểm
@@ -15,12 +16,12 @@ tra và lưu đủ cấu hình để thành viên khác có thể chạy lại.
 | Hạng mục | Trạng thái | Ghi chú |
 |---|---|---|
 | EDA dữ liệu gốc | Hoàn thành | Có notebook khám phá dữ liệu. |
-| Chuẩn hóa, deduplicate, train/dev split | Hoàn thành | Split ở cấp document. |
+| Chuẩn hóa, deduplicate, train/dev split | Hoàn thành | `train_test_split`, stratify theo category, seed 67, ở cấp document/duplicate-group. |
 | Structural segmentation/alignment | Hoàn thành baseline | Vẫn có khả năng lệch nghĩa. |
-| Semantic filtering | Chưa chạy | Code đã có; cần chạy LaBSE và chọn threshold. |
-| Tokenizer analysis | Chưa làm | Thực hiện sau semantic filtering. |
-| Zero-shot baseline và evaluator | Chưa làm | Là bước trước fine-tuning. |
-| Fine-tuning | Chưa làm | Chỉ bắt đầu khi data gate đạt. |
+| Semantic filtering | Tùy chọn, chưa dùng cho baseline hiện tại | Code LaBSE vẫn được giữ để thử nghiệm sau; không dùng artifact cũ đã xóa. |
+| Tokenizer analysis | Đã có code | Chạy `audit` bằng tokenizer VinAI trên cloud GPU/CPU. |
+| Zero-shot baseline và evaluator | Đã triển khai code | Cần chạy đủ hai chiều và ghi nhận metric chính thức. |
+| Fine-tuning | Sẵn sàng chạy | Có cấu hình LoRA/full, notebook Colab/Kaggle và checkpoint resume. |
 | Document inference và Docker | Chưa làm | Giai đoạn sau khi model ổn định. |
 
 ## Nguyên tắc chung
@@ -38,7 +39,7 @@ tra và lưu đủ cấu hình để thành viên khác có thể chạy lại.
 
 ```text
 DATA GATE
-  Dữ liệu semantic-clean và đã audit
+  Dữ liệu split seed 67, structural alignment và đã audit
        ↓
 BASELINE GATE
   Có evaluator + zero-shot baseline tái lập được
@@ -53,7 +54,7 @@ SUBMISSION GATE
   Docker chạy offline, đúng giao diện và giới hạn tài nguyên
 ```
 
-## 1. Semantic filtering
+## 1. Semantic filtering (thử nghiệm tùy chọn)
 
 **Mục đích:** loại các cặp structural alignment có độ dài tương tự nhưng không
 phải bản dịch của nhau. LaBSE tạo embedding cho hai ngôn ngữ, còn cosine
@@ -71,14 +72,16 @@ Lệnh khởi đầu:
 pip install -r requirements-semantic.txt
 
 .\NLP_venv\Scripts\python.exe -m src.data.semantic_filter `
-  --input-dir artifacts/processed `
-  --output-dir artifacts/semantic `
+  --input-dir artifacts/processed_sklearn_seed67 `
+  --output-dir artifacts/semantic_sklearn_seed67 `
   --model-name sentence-transformers/LaBSE `
   --minimum-similarity 0.72 `
   --batch-size 64
 ```
 
-**Đầu ra:** các file segment đã lọc trong `artifacts/semantic`.
+**Đầu ra:** các file segment thử nghiệm đã lọc trong một thư mục version mới.
+Không ghi đè hoặc trộn các file này với baseline
+`artifacts/processed_sklearn_seed67`.
 
 **Hoàn thành khi:** nhóm đã audit mẫu đúng/sai ở nhiều khoảng điểm, chọn threshold
 có lý do và không có category bị mất tỷ lệ dữ liệu bất thường.
@@ -216,7 +219,8 @@ mất năng lực dịch tổng quát ban đầu.
 
 - Model riêng English → Vietnamese.
 - Model riêng Vietnamese → English.
-- Chỉ train bằng `artifacts/semantic/segments_train_*`.
+- Baseline hiện tại chỉ train bằng
+  `artifacts/processed_sklearn_seed67/segments_train_*`.
 - Chọn checkpoint bằng dev set.
 - Không dùng public test để cập nhật trọng số.
 
@@ -426,8 +430,9 @@ balanced: beam=2, ưu tiên score tổng hợp và tốc độ
 10. Tối ưu, Docker và kiểm thử offline
 ```
 
-Điểm dừng gần nhất là tạo được `artifacts/semantic` đã kiểm toán. Chưa đạt điểm
-này thì chưa nên bắt đầu fine-tuning.
+Điểm dừng gần nhất là audit tokenizer, chạy zero-shot E0 và smoke test LoRA E1.
+Chỉ ghi nhận full run sau khi ba bước này hoàn thành và báo cáo token không có
+vấn đề nghiêm trọng.
 
 ## Checklist quản lý thí nghiệm
 

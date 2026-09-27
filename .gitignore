@@ -1,7 +1,13 @@
-data/
+/data/
 NLP_venv
 __pycache__/
 *.py[cod]
 
 # Generated intermediate data; keep local and do not upload to Git.
 artifacts/processed/
+
+# Local training outputs and model caches.
+outputs/
+checkpoints/
+.cache/
+wandb/
