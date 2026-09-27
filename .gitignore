@@ -1,0 +1,4 @@
+data/
+NLP_venv
+__pycache__/
+*.py[cod]
