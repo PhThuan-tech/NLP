@@ -30,7 +30,7 @@ từ context/terminology.
 Nguồn mặc định là:
 
 ```text
-artifacts/processed_sklearn_seed67/
+artifacts/processed_clean_seed67_v2/
 ├── segments_train_en2vi.jsonl
 ├── segments_train_vi2en.jsonl
 ├── segments_dev_en2vi.jsonl
@@ -39,11 +39,26 @@ artifacts/processed_sklearn_seed67/
 └── manifest.json
 ```
 
-Dataset được chia bằng `sklearn.model_selection.train_test_split` ở cấp
+Dataset v1 được chia bằng `sklearn.model_selection.train_test_split` ở cấp
 document/duplicate-group, với `stratify=category` và `random_state=67`, trước
-khi segmentation. Manifest hiện tại ghi nhận 753 document/18.802 segment train
-và 84 document/1.899 segment dev. Hai file theo hai chiều chứa cùng cặp song
-ngữ nhưng đảo `source`/`target`.
+khi segmentation. Bước finalization xác định tạo v2, loại source=target, trùng
+trong split, mọi source/target train trùng dev và các cặp có dấu hiệu đảo ngôn
+ngữ. V2 giữ 18.316 segment train, 1.877 dev và 1.211 public test. Hai file theo
+hai chiều chứa cùng cặp song ngữ nhưng đảo `source`/`target`.
+
+Tạo lại v2 từ v1 (không ghi đè v1):
+
+```bash
+python -m src.data.finalize \
+  --input-dir artifacts/processed_sklearn_seed67 \
+  --output-dir artifacts/processed_clean_seed67_v2 \
+  --dataset-id legal_envi_clean_seed67_v2
+```
+
+`src.data.finalize` cũng hỗ trợ LaBSE qua `--semantic-model` và
+`--minimum-semantic-similarity`. Chỉ bật sau khi nhóm duyệt threshold và phải
+tạo dataset ID/thư mục mới; không thay âm thầm v2 vì semantic filter sẽ làm đổi
+benchmark.
 
 Quy tắc sử dụng split:
 
@@ -86,7 +101,7 @@ Vai trò các file chính:
 | `src/vinai_baseline/modeling.py` | Tải đúng VinAI model/tokenizer, cấu hình generation và LoRA. |
 | `src/vinai_baseline/metrics.py` | SacreBLEU, chrF++, độ dài, output rỗng, bảo toàn số và tham chiếu pháp lý. |
 | `src/vinai_baseline/runner.py` | Điều phối audit/evaluate/train, checkpoint, prediction và manifest. |
-| `src/vinai_baseline/cli.py` | Một entry point dùng giống nhau trên local, Colab và Kaggle. |
+| `src/vinai_baseline/cli.py` | Entry point thống nhất cho audit/evaluate/train/verify trên Colab. |
 | `configs/vinai/*.json` | Cấu hình tái lập cho mỗi chiều và mỗi chế độ. |
 | `tests/test_vinai_baseline.py` | Unit test không cần tải model/GPU. |
 
@@ -109,7 +124,9 @@ python -m src.vinai_baseline.cli evaluate \
 
 LoRA thêm các ma trận hạng thấp vào `q_proj` và `v_proj` của attention; base
 model được đóng băng. Cấu hình khởi đầu là rank 16, alpha 32, dropout 0.05,
-learning rate `1e-4`, effective batch size 16 và 3 epoch.
+learning rate `1e-4`, effective batch size 16 và 3 epoch. Eval/save chạy cuối
+mỗi epoch thay vì mỗi 250 optimizer step, giảm mạnh generation trên dev mà
+không đổi cấu hình suy luận cuối.
 
 Lợi ích: ít tham số cần cập nhật, dùng ít VRAM hơn full fine-tuning, checkpoint
 nhỏ và phù hợp để thử nhiều giả thuyết trên GPU T4/P100 16 GB. `best_model/`
@@ -174,22 +191,16 @@ Checkpoint tốt nhất hiện được chọn theo dev `chrF`. Khi so sánh E0/
 chỉ nhìn một metric: model tốt phải tăng BLEU/chrF mà không làm giảm mạnh legal
 preservation hoặc sinh output rỗng/quá ngắn.
 
-## 7. Cài đặt và kiểm thử local
+## 7. Kiểm thử trước khi đóng gói
 
-PyTorch CUDA thường đã có sẵn trên Colab/Kaggle. Vì vậy file requirement không
+PyTorch CUDA đã có sẵn trên Colab. Vì vậy file requirement không
 ép cài lại Torch để tránh phá phiên bản CUDA của runtime.
 
-```powershell
-# Windows PowerShell
-.\NLP_venv\Scripts\python.exe -m pip install -r requirements-training.txt
-.\NLP_venv\Scripts\python.exe -m unittest discover -s tests -v
-.\NLP_venv\Scripts\python.exe -m src.vinai_baseline.cli --help
-```
-
 ```bash
-# Linux / Colab / Kaggle
+# Colab hoặc môi trường kiểm thử bất kỳ
 python -m pip install -r requirements-training.txt
 python -m unittest discover -s tests -v
+python -m src.vinai_baseline.cli --help
 ```
 
 Kiểm tra GPU:
@@ -207,49 +218,35 @@ trên CPU quá chậm cho full dev/training.
 Notebook: `notebooks/02_vinai_colab.ipynb`.
 
 1. Nén project thành một file ZIP, bao gồm `src/`, `configs/`,
-   `requirements-training.txt` và `artifacts/processed_sklearn_seed67/`.
+   `requirements-training-colab.txt`, `requirements-training.txt` và
+   `artifacts/processed_clean_seed67_v2/`.
 2. Upload/mở notebook trong Colab.
 3. Chọn **Runtime → Change runtime type → GPU**.
 4. Chạy lần lượt các cell: kiểm tra GPU, mount Drive, upload/giải nén ZIP và
-   cài dependency.
+   cài dependency. Notebook ưu tiên file version-locked
+   `requirements-training-colab.txt`; PyTorch vẫn dùng bản đi cùng CUDA runtime.
 5. Nếu muốn, tạo Colab Secret `HF_TOKEN`; model public nên token không bắt buộc.
 6. Chọn `DIRECTION` và `MODE`; giữ `RUN_FULL=False`.
 7. Chạy audit và smoke test. Đọc `token_audit_summary.json` cùng metric smoke.
-8. Khi smoke test thành công, đặt `RUN_FULL=True` và chạy cell full run.
+   Với LoRA/full, smoke còn reload model đã lưu và tạo
+   `reports/reload_smoke.json`.
+8. Chạy full zero-shot trên toàn dev để lấy mốc E0. Sau đó đổi sang LoRA, smoke
+   lại, đặt `RUN_FULL=True` và chạy E1.
 
-Output được ghi trực tiếp vào:
+Output được ghi vào thư mục riêng cho từng run:
 
 ```text
-/content/drive/MyDrive/NLP_runs/vinai_<direction>_<mode>/
+/content/drive/MyDrive/NLP_runs/<dataset_id>/<direction>/<mode>/<run_id>/
 ```
 
 Nhờ vậy checkpoint vẫn còn khi runtime bị ngắt. Ghi vào Drive có thể chậm hơn
 disk local; nếu ưu tiên tốc độ, đổi `OUTPUT_DIR` sang `/content/outputs`, rồi
 copy kết quả sang Drive sau khi run kết thúc.
 
-## 9. Chạy Kaggle
+Mỗi thành viên đặt `MEMBER_TAG` riêng và mỗi giả thuyết đặt `EXPERIMENT_TAG`
+riêng. Chi tiết quy tắc nhóm nằm tại `docs/team_handoff.md`.
 
-Notebook: `notebooks/03_vinai_kaggle.ipynb`.
-
-1. Tạo Kaggle Notebook, mở **Notebook options**, bật GPU và Internet.
-2. Upload notebook hoặc chọn **File → Import Notebook**.
-3. Chạy cell clone repository và cài dependency.
-4. Có thể tạo Kaggle Secret `HF_TOKEN`.
-5. Chọn `DIRECTION`, `MODE`, giữ `RUN_FULL=False`, sau đó audit và smoke test.
-6. Đặt `RUN_FULL=True` rồi chạy full.
-7. Sau khi xong, bấm **Save Version**; nếu không, dữ liệu trong
-   `/kaggle/working` sẽ mất khi session kết thúc.
-
-Output Kaggle:
-
-```text
-/kaggle/working/outputs/vinai_<direction>_<mode>/
-```
-
-Kaggle có giới hạn thời gian session. Với hai chiều dịch, nên chạy hai notebook
-version riêng để tránh hết thời gian và để log dễ so sánh.
-
-## 10. Smoke test trước full run
+## 9. Smoke test trước full run
 
 Notebook tự chạy 32 mẫu train và 16 mẫu dev đối với LoRA/full, hoặc 16 mẫu dev
 đối với zero-shot. Mục tiêu smoke test là phát hiện:
@@ -263,6 +260,23 @@ Notebook tự chạy 32 mẫu train và 16 mẫu dev đối với LoRA/full, ho�
 Smoke metric không có ý nghĩa để kết luận chất lượng vì số mẫu quá ít và
 fine-tuning quá ngắn.
 
+Trong khi chạy, CLI in timestamp cho từng giai đoạn: tải tokenizer, audit dữ
+liệu, tải model, train, sinh bản dịch validation và lưu artifact. Thanh tiến độ
+của Trainer hiển thị số batch/step; cuối command notebook in thời điểm hoàn
+thành và tổng thời gian `HH:MM:SS`.
+
+Cell kết quả tự chọn run hoàn chỉnh gần nhất (smoke hoặc full), rồi hiển thị:
+
+- BLEU, chrF++, runtime, peak VRAM và tỷ lệ output rỗng;
+- F1 bảo toàn số và viện dẫn pháp luật;
+- metric theo category;
+- năm mẫu `source → prediction → reference` cố định bằng seed 67;
+- kiểm tra số prediction có khớp `evaluated_records` hay không.
+
+Để kết luận chất lượng, phải chạy toàn bộ dev set và so zero-shot với LoRA/full
+trên đúng cùng split. BLEU/chrF không phải “accuracy” tuyệt đối; cần đọc mẫu lỗi,
+đặc biệt là phủ định, nghĩa vụ, con số, điều/khoản/điểm và thuật ngữ pháp lý.
+
 CLI tương đương:
 
 ```bash
@@ -273,21 +287,24 @@ python -m src.vinai_baseline.cli train \
   --max-validation-samples 16
 ```
 
-## 11. Resume khi runtime bị ngắt
+## 10. Resume khi runtime bị ngắt
 
-Chọn checkpoint gần nhất trong thư mục `checkpoints/checkpoint-*`, rồi chạy:
+Có thể để code tự chọn checkpoint có step lớn nhất:
 
 ```bash
 python -m src.vinai_baseline.cli train \
   --config configs/vinai/en2vi_lora.json \
   --output-dir outputs/vinai_en2vi_legal_lora \
-  --resume-from-checkpoint outputs/vinai_en2vi_legal_lora/checkpoints/checkpoint-1000
+  --resume-from-checkpoint last
 ```
 
 Output directory phải là cùng run cũ. Không resume checkpoint bằng config/model
-khác chiều. Trên Colab, checkpoint nằm trong Google Drive path đã cấu hình.
+khác chiều. Code kiểm tra `trainer_state.json`, bắt checkpoint nằm trong đúng
+`output_dir/checkpoints/` và từ chối nếu data/model/seed/hyperparameter khác
+`resolved_config.json`. Trên notebook, đặt `RUN_ID_OVERRIDE` bằng run cũ và
+`RESUME_FROM_CHECKPOINT="last"`.
 
-## 12. Cấu trúc output
+## 11. Cấu trúc output
 
 ```text
 output_dir/
@@ -300,9 +317,11 @@ output_dir/
 │   └── validation_predictions.jsonl
 └── reports/
     ├── parameter_report.json
+    ├── reload_smoke.json
     ├── token_audit_train.json
     ├── token_audit_validation.json
     ├── token_audit_summary.json
+    ├── training_plan.json
     ├── train_metrics.json
     ├── validation_metrics_by_category.json
     └── validation_metrics.json
@@ -316,12 +335,16 @@ output_dir/
 - `validation_predictions.jsonl`: source, reference, prediction và metadata để
   error analysis mà không phải inference lại;
 - `parameter_report.json`: tổng và tỷ lệ tham số thực sự được train;
+- `reload_smoke.json`: bằng chứng adapter/full model đã save, reload và generate
+  thành công (chỉ LoRA/full);
 - `token_audit_*.json`: phân bố token, số mẫu retained/dropped;
+- `training_plan.json`: số optimizer update dự kiến, effective batch và số lần
+  chạy validation trong quá trình train;
 - `validation_metrics.json`: quality, legal preservation, runtime và peak VRAM.
 - `validation_metrics_by_category.json`: cùng bộ metric tách theo lĩnh vực để
   phát hiện model tăng điểm tổng nhưng giảm mạnh ở một category.
 
-## 13. Hyperparameter nào nên chỉnh trước
+## 12. Hyperparameter nào nên chỉnh trước
 
 Giữ cố định dataset/dev split và thay một yếu tố mỗi thí nghiệm:
 
@@ -338,7 +361,12 @@ Nếu OOM, ưu tiên giảm `per_device_eval_batch_size`, rồi giảm
 gradient accumulation một cách vô tình: effective batch size bằng
 `per_device_train_batch_size × gradient_accumulation_steps × số GPU`.
 
-## 14. Lỗi thường gặp
+Các tối ưu đang bật được chọn để giữ kết quả dễ so sánh: dynamic padding,
+mixed precision, gradient checkpointing, LoRA và eval/save theo epoch. Chưa bật
+QLoRA, quantization, pruning, distillation, `torch.compile` hoặc giảm beam trong
+baseline vì chúng có thể đổi chất lượng, độ ổn định hoặc điều kiện so sánh.
+
+## 13. Lỗi thường gặp
 
 ### `CUDA is required...`
 
@@ -354,17 +382,12 @@ dung pháp lý.
 ### Tải model chậm/HTTP rate limit
 
 Thêm `HF_TOKEN` vào Secrets, xác nhận Internet được bật và chạy lại. Cache của
-Colab/Kaggle tồn tại trong session nên không cần tải lại ở mỗi cell.
+Colab tồn tại trong session nên không cần tải lại ở mỗi cell.
 
 ### `No module named sentencepiece/peft/sacrebleu`
 
 Chạy lại `pip install -r requirements-training.txt`, sau đó restart kernel nếu
 pip yêu cầu.
-
-### Kaggle mất checkpoint
-
-Kết quả chỉ bền vững sau **Save Version**. Có thể tạo Kaggle Dataset từ output
-cho run dài hoặc resume ở notebook khác.
 
 ### Audit báo nhiều mẫu vượt 512
 
@@ -372,7 +395,7 @@ Mở báo cáo, xác định category/segment bị ảnh hưởng, rồi re-segm
 khoản hoặc điểm. `drop` là baseline minh bạch, chưa chắc là lựa chọn cuối tốt
 nhất.
 
-## 15. Checklist trước khi ghi nhận kết quả chính thức
+## 14. Checklist trước khi ghi nhận kết quả chính thức
 
 - [ ] Git đã chứa code/config/notebook cùng revision với run.
 - [ ] GPU và phiên bản package được lưu trong `run_manifest.json`.
@@ -385,7 +408,7 @@ nhất.
 - [ ] LoRA adapter đi kèm tên và revision base model.
 - [ ] Sao lưu checkpoint khỏi runtime tạm thời.
 
-## 16. Tài liệu kỹ thuật tham khảo
+## 15. Tài liệu kỹ thuật tham khảo
 
 - VinAI model card: <https://huggingface.co/vinai/vinai-translate-en2vi-v2>
 - Hugging Face Trainer: <https://huggingface.co/docs/transformers/main_classes/trainer>

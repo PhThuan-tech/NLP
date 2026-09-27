@@ -3,24 +3,26 @@
 Repository xây dựng pipeline dịch máy Anh–Việt/Việt–Anh cho văn bản pháp luật.
 Dữ liệu huấn luyện hiện tại đã được chia ở cấp document bằng
 `sklearn.model_selection.train_test_split` với seed `67`, sau đó qua structural
-alignment. Baseline dùng `vinai/vinai-translate-en2vi-v2` và
+alignment và finalization chống trùng/rò rỉ thành
+`legal_envi_clean_seed67_v2`. Seed huấn luyện cũng được khóa ở `67`. Baseline
+dùng `vinai/vinai-translate-en2vi-v2` và
 `vinai/vinai-translate-vi2en-v2`.
 
-## Bắt đầu nhanh
+## Bắt đầu nhanh trên Colab
 
-```bash
-pip install -r requirements-training.txt
-python -m src.vinai_baseline.cli audit --config configs/vinai/en2vi_lora.json
-python -m src.vinai_baseline.cli train --config configs/vinai/en2vi_lora.json
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package_colab.ps1
 ```
 
-Trên GPU cloud, dùng một trong hai notebook:
+Sau đó mở `notebooks/02_vinai_colab.ipynb`, bật GPU và upload
+`NLP_colab.zip`. Notebook dùng `requirements-training-colab.txt` đã khóa phiên
+bản; PyTorch/CUDA lấy từ runtime Colab.
 
-- `notebooks/02_vinai_colab.ipynb`
-- `notebooks/03_vinai_kaggle.ipynb`
+Trên GPU cloud, dùng notebook chính `notebooks/02_vinai_colab.ipynb`.
 
-Hướng dẫn kiến trúc, cấu hình, quy trình chạy, output và xử lý lỗi nằm tại
-`docs/vinai_baseline_training.md`. Roadmap tổng thể nằm tại `docs/next_steps.md`.
+Thành viên mới đọc `docs/team_handoff.md` trước; tài liệu này chứa cả quy trình
+bàn giao và quy ước thí nghiệm nhóm. Chi tiết kỹ thuật nằm tại
+`docs/vinai_baseline_training.md`.
 
 Không dùng `segments_public_test_*` để train, early stopping hoặc chọn
 hyperparameter.

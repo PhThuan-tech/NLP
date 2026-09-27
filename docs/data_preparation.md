@@ -119,9 +119,9 @@ document vào cả train và dev, gây data leakage.
 Public test không tham gia split và không được gộp vào train. Target trong
 public test chỉ phục vụ đánh giá và chọn hệ thống.
 
-> **Dataset hiện hành:** `artifacts/processed_sklearn_seed67` đã được tạo lại
-> bằng split scikit-learn với seed `67`. Đây là dataset mặc định cho baseline;
-> không trộn với các artifact dùng thuật toán split hoặc seed cũ.
+> **Dataset nguồn:** `artifacts/processed_sklearn_seed67` được tạo bằng split
+> scikit-learn với seed `67`. Baseline huấn luyện dùng bản finalization bất biến
+> `artifacts/processed_clean_seed67_v2`; không trộn hai version trong một run.
 
 ### 5. Tạo logical block
 
@@ -227,8 +227,8 @@ Ngưỡng `0.72` chỉ là điểm bắt đầu. Không được hiểu rằng m
 Từ project root:
 
 ```powershell
-.\NLP_venv\Scripts\python.exe -m unittest discover -s tests -v
-.\NLP_venv\Scripts\python.exe -m src.data.prepare `
+python -m unittest discover -s tests -v
+python -m src.data.prepare `
   --project-root . `
   --output-dir artifacts/processed_sklearn_seed67 `
   --seed 67
@@ -238,21 +238,23 @@ Có thể chạy semantic filtering như một thí nghiệm riêng (nên dùng 
 
 ```powershell
 pip install -r requirements-semantic.txt
-.\NLP_venv\Scripts\python.exe -m src.data.semantic_filter `
+python -m src.data.finalize `
   --input-dir artifacts/processed_sklearn_seed67 `
-  --output-dir artifacts/semantic_sklearn_seed67 `
-  --model-name sentence-transformers/LaBSE `
-  --minimum-similarity 0.72
+  --output-dir artifacts/processed_clean_labse072_seed67_v3 `
+  --dataset-id legal_envi_clean_labse072_seed67_v3 `
+  --semantic-model sentence-transformers/LaBSE `
+  --minimum-semantic-similarity 0.72
 ```
 
 Ngưỡng `0.72` là điểm khởi đầu, không phải hằng số tối ưu. Hãy lấy mẫu thủ
 công theo các khoảng similarity trước khi quyết định dùng dataset thử nghiệm
-này. Baseline hiện tại vẫn train từ `artifacts/processed_sklearn_seed67/`.
+này. Nếu chốt dùng semantic filter, phải tạo dataset ID mới. Baseline hiện tại
+train từ `artifacts/processed_clean_seed67_v2/`.
 
 Chạy lại và thay các file được pipeline sinh ra:
 
 ```powershell
-.\NLP_venv\Scripts\python.exe -m src.data.prepare `
+python -m src.data.prepare `
   --project-root . `
   --output-dir artifacts/processed_sklearn_seed67 `
   --seed 67 `
@@ -262,7 +264,7 @@ Chạy lại và thay các file được pipeline sinh ra:
 Có thể điều chỉnh quality gate:
 
 ```powershell
-.\NLP_venv\Scripts\python.exe -m src.data.prepare `
+python -m src.data.prepare `
   --project-root . `
   --output-dir artifacts/processed_sklearn_seed67 `
   --seed 67 `

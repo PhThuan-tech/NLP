@@ -6,8 +6,10 @@
   "output_dir": "outputs/vinai_vi2en_zero_shot",
   "seed": 67,
   "data": {
+    "dataset_id": "legal_envi_clean_seed67_v2",
+    "manifest_file": "artifacts/processed_clean_seed67_v2/manifest.json",
     "train_file": "",
-    "validation_file": "artifacts/processed_sklearn_seed67/segments_dev_vi2en.jsonl",
+    "validation_file": "artifacts/processed_clean_seed67_v2/segments_dev_vi2en.jsonl",
     "max_source_length": 512,
     "max_target_length": 512,
     "overlength_policy": "drop",

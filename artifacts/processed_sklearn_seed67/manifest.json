@@ -1,4 +1,12 @@
 {
+  "dataset_id": "legal_envi_sklearn_seed67_v1",
+  "split_contract": {
+    "method": "sklearn.model_selection.train_test_split",
+    "unit": "duplicate_group",
+    "stratify": "category",
+    "seed": 67,
+    "dev_ratio": 0.1
+  },
   "created_at_utc": "2026-09-27T07:31:53.376759+00:00",
   "python_version": "3.13.5 | packaged by Anaconda, Inc. | (main, Jun 12 2025, 16:37:03) [MSC v.1929 64 bit (AMD64)]",
   "pandas_version": "3.0.6",
@@ -27,6 +35,47 @@
     "segments_public_test_en2vi": 1212,
     "segments_public_test_vi2en": 1212,
     "rejected_alignments": 147951
+  },
+  "files": {
+    "document_splits.csv": {
+      "sha256": "88724d265d6fad9a44f38d025e92a23773dda0c4545dad103bed82dd7346da24"
+    },
+    "documents_train.jsonl": {
+      "sha256": "74fff2e41a82484c71354c16dd4b5802e0756440431217962114cde7d631ceab",
+      "records": 753
+    },
+    "documents_dev.jsonl": {
+      "sha256": "38cc2559ebf3fa7e05091eda91fdc77d71c6ab189faf4baebcc15ab3ee9f8438",
+      "records": 84
+    },
+    "documents_public_test.jsonl": {
+      "sha256": "d8a46e339ffee5e2440df799f331c06c1557c7c475d7613386ad642490b9f3dc",
+      "records": 50
+    },
+    "segments_train_en2vi.jsonl": {
+      "sha256": "d2bda67152c148107d4c5b85d9546c26cd80bf24683e9b56b0b9c8ab2fc447b1",
+      "records": 18802
+    },
+    "segments_dev_en2vi.jsonl": {
+      "sha256": "dd1282d3a244c045642192d6fef850f9aa01cb5afeb1f7440d413cac7236509b",
+      "records": 1899
+    },
+    "segments_public_test_en2vi.jsonl": {
+      "sha256": "7406d9d8c2c0290f98c41cbf34df24fcc364cb3c6b81ab8ce397ebc6ac9599ce",
+      "records": 1212
+    },
+    "segments_train_vi2en.jsonl": {
+      "sha256": "0f9b61259d2bb396f6d4e9ec481c28c4400af906c50e09b609203e68fccf11d2",
+      "records": 18802
+    },
+    "segments_dev_vi2en.jsonl": {
+      "sha256": "e72dc79b042de8a2b822f09060e401cb863fe57abead0099b3d8a654efbb2adc",
+      "records": 1899
+    },
+    "segments_public_test_vi2en.jsonl": {
+      "sha256": "32c353edb20e0d7d2f6b64ca0ff9b49f86f48787d5672054f55b5d571219094f",
+      "records": 1212
+    }
   },
   "notes": [
     "Split uses sklearn train_test_split with stratify=category and random_state=seed at duplicate-group level before segmentation.",

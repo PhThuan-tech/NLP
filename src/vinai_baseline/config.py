@@ -1,7 +1,7 @@
 """Typed experiment configuration and validation.
 
 The runtime is intentionally configured through JSON so the exact same files can
-be used from Windows, Google Colab, and Kaggle without a YAML dependency.
+be validated on Windows and executed on Google Colab without a YAML dependency.
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ VINAI_MODELS: dict[str, str] = {
 class DataConfig:
     train_file: str
     validation_file: str
+    dataset_id: str = ""
+    manifest_file: str = ""
     source_field: str = "source"
     target_field: str = "target"
     max_source_length: int = 512
@@ -38,6 +40,10 @@ class DataConfig:
     max_validation_samples: int | None = None
 
     def validate(self, direction: Direction, require_train: bool) -> None:
+        if bool(self.dataset_id) != bool(self.manifest_file):
+            raise ValueError(
+                "data.dataset_id and data.manifest_file must be provided together"
+            )
         if require_train and not self.train_file:
             raise ValueError("data.train_file is required for training")
         if not self.validation_file:
@@ -46,6 +52,12 @@ class DataConfig:
             raise ValueError("Maximum sequence lengths must be at least 8 tokens")
         if self.audit_batch_size < 1:
             raise ValueError("data.audit_batch_size must be positive")
+        for name, value in (
+            ("max_train_samples", self.max_train_samples),
+            ("max_validation_samples", self.max_validation_samples),
+        ):
+            if value is not None and value < 1:
+                raise ValueError(f"data.{name} must be positive when provided")
         if self.overlength_policy not in {"error", "drop", "truncate"}:
             raise ValueError(f"Unsupported overlength policy: {self.overlength_policy}")
 
@@ -190,7 +202,7 @@ class ExperimentConfig:
             direction=raw["direction"],
             model_name=raw["model_name"],
             output_dir=raw["output_dir"],
-            seed=int(raw.get("seed", 42)),
+            seed=int(raw.get("seed", 67)),
             data=DataConfig(**raw["data"]),
             generation=GenerationConfig(**raw.get("generation", {})),
             training=TrainingConfig(**raw.get("training", {})),
@@ -213,6 +225,8 @@ class ExperimentConfig:
             raise ValueError("run_name cannot be empty")
         if not self.output_dir:
             raise ValueError("output_dir cannot be empty")
+        if self.seed < 0:
+            raise ValueError("seed cannot be negative")
         self.data.validate(
             direction=self.direction,
             require_train=self.training.mode != "none",

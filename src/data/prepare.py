@@ -61,6 +61,7 @@ class PreparationConfig:
     """Configuration recorded in the output manifest."""
 
     seed: int = 67
+    dataset_version: str = "v1"
     dev_ratio: float = 0.10
     expected_en_vi_char_ratio: float = 1.12
     minimum_alignment_score: float = 0.75
@@ -69,6 +70,8 @@ class PreparationConfig:
     lookahead_weight: float = 0.20
 
     def validate(self) -> None:
+        if not re.fullmatch(r"[a-z0-9_-]+", self.dataset_version):
+            raise ValueError("dataset_version must use lowercase ASCII, digits, _ or -")
         if not 0 < self.dev_ratio < 1:
             raise ValueError("dev_ratio must be between 0 and 1")
         if not 0 <= self.minimum_alignment_score <= 1:
@@ -1040,6 +1043,14 @@ def write_json(path: Path, value: object) -> None:
     temp_path.replace(path)
 
 
+def file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    digest_value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest_value.update(chunk)
+    return digest_value.hexdigest()
+
+
 def ensure_output_paths(output_dir: Path, overwrite: bool) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     known_outputs = [
@@ -1189,7 +1200,28 @@ def prepare_dataset(
     }
     write_json(output_dir / "quality_report.json", quality_report)
 
+    frozen_files: dict[str, dict[str, object]] = {
+        "document_splits.csv": {
+            "sha256": file_sha256(output_dir / "document_splits.csv")
+        }
+    }
+    for key, count in counts.items():
+        if key.startswith(("documents_", "segments_")):
+            filename = f"{key}.jsonl"
+            frozen_files[filename] = {
+                "sha256": file_sha256(output_dir / filename),
+                "records": count,
+            }
+
     manifest = {
+        "dataset_id": f"legal_envi_sklearn_seed{config.seed}_{config.dataset_version}",
+        "split_contract": {
+            "method": "sklearn.model_selection.train_test_split",
+            "unit": "duplicate_group",
+            "stratify": "category",
+            "seed": config.seed,
+            "dev_ratio": config.dev_ratio,
+        },
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "python_version": sys.version,
         "pandas_version": pd.__version__,
@@ -1200,6 +1232,7 @@ def prepare_dataset(
         "output_dir": str(output_dir.resolve()),
         "config": asdict(config),
         "counts": counts,
+        "files": frozen_files,
         "notes": [
             "Split uses sklearn train_test_split with stratify=category and random_state=seed at duplicate-group level before segmentation.",
             "Alignment is heuristic; inspect rejection and alignment reports before training.",
@@ -1219,6 +1252,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--output-dir", type=Path, default=Path("artifacts/processed")
     )
     parser.add_argument("--seed", type=int, default=67)
+    parser.add_argument("--dataset-version", default="v1")
     parser.add_argument("--dev-ratio", type=float, default=0.10)
     parser.add_argument("--minimum-alignment-score", type=float, default=0.75)
     parser.add_argument("--maximum-block-words", type=int, default=550)
@@ -1240,6 +1274,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir = project_root / output_dir
     config = PreparationConfig(
         seed=args.seed,
+        dataset_version=args.dataset_version,
         dev_ratio=args.dev_ratio,
         minimum_alignment_score=args.minimum_alignment_score,
         maximum_block_words=args.maximum_block_words,

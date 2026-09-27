@@ -1,0 +1,10 @@
+-r requirements.txt
+
+# Frozen user-space stack for comparable Colab runs. PyTorch is intentionally
+# provided by the selected Colab CUDA runtime and is recorded in run_manifest.
+transformers==5.17.0
+accelerate==1.15.0
+peft==0.21.0
+sacrebleu==2.6.0
+sentencepiece==0.2.2
+protobuf==6.33.6

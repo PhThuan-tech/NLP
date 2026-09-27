@@ -13,7 +13,7 @@ from .runner import BaselineRunner
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["audit", "evaluate", "train"])
+    parser.add_argument("command", choices=["audit", "evaluate", "train", "verify"])
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output-dir")
     parser.add_argument("--train-file")
@@ -48,8 +48,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if config.training.mode != "none":
             raise ValueError("The evaluate command requires a zero-shot mode='none' config")
         result = runner.evaluate()
-    else:
+    elif args.command == "train":
         result = runner.train()
+    else:
+        result = runner.verify_saved_model()
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

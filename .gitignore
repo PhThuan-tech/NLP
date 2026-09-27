@@ -1,7 +1,10 @@
 /data/
 NLP_venv
+.venv/
+venv/
 __pycache__/
 *.py[cod]
+NLP_colab.zip
 
 # Generated intermediate data; keep local and do not upload to Git.
 artifacts/processed/

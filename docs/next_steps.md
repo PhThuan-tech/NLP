@@ -4,8 +4,8 @@
 
 Sau structural preprocessing, cần hoàn thiện chất lượng dữ liệu, xây baseline,
 fine-tune model, đánh giá ở cấp document và đóng gói submission. Dataset dùng
-cho baseline hiện tại là `artifacts/processed_sklearn_seed67`, được chia ở cấp
-document bằng scikit-learn với seed `67`.
+cho baseline hiện tại là `artifacts/processed_clean_seed67_v2`, bắt nguồn từ
+split document bằng scikit-learn seed `67` và đã qua finalization chống leakage.
 
 Tài liệu này là roadmap thực thi cho cả nhóm. Mỗi giai đoạn có mục đích, đầu ra
 và điều kiện hoàn thành. Chỉ nên chuyển bước khi đầu ra trước đó đã được kiểm
@@ -17,11 +17,11 @@ tra và lưu đủ cấu hình để thành viên khác có thể chạy lại.
 |---|---|---|
 | EDA dữ liệu gốc | Hoàn thành | Có notebook khám phá dữ liệu. |
 | Chuẩn hóa, deduplicate, train/dev split | Hoàn thành | `train_test_split`, stratify theo category, seed 67, ở cấp document/duplicate-group. |
-| Structural segmentation/alignment | Hoàn thành baseline | Vẫn có khả năng lệch nghĩa. |
-| Semantic filtering | Tùy chọn, chưa dùng cho baseline hiện tại | Code LaBSE vẫn được giữ để thử nghiệm sau; không dùng artifact cũ đã xóa. |
+| Structural segmentation/alignment | Hoàn thành baseline | Đã thêm quality/language gate xác định ở v2. |
+| Semantic filtering | Tùy chọn, chưa dùng cho baseline hiện tại | `src.data.finalize` hỗ trợ LaBSE; phải audit threshold và tạo dataset ID mới. |
 | Tokenizer analysis | Đã có code | Chạy `audit` bằng tokenizer VinAI trên cloud GPU/CPU. |
 | Zero-shot baseline và evaluator | Đã triển khai code | Cần chạy đủ hai chiều và ghi nhận metric chính thức. |
-| Fine-tuning | Sẵn sàng chạy | Có cấu hình LoRA/full, notebook Colab/Kaggle và checkpoint resume. |
+| Fine-tuning | Sẵn sàng chạy | Có cấu hình LoRA/full, notebook Colab và checkpoint resume. |
 | Document inference và Docker | Chưa làm | Giai đoạn sau khi model ổn định. |
 
 ## Nguyên tắc chung
@@ -71,17 +71,18 @@ Lệnh khởi đầu:
 ```powershell
 pip install -r requirements-semantic.txt
 
-.\NLP_venv\Scripts\python.exe -m src.data.semantic_filter `
+python -m src.data.finalize `
   --input-dir artifacts/processed_sklearn_seed67 `
-  --output-dir artifacts/semantic_sklearn_seed67 `
-  --model-name sentence-transformers/LaBSE `
-  --minimum-similarity 0.72 `
-  --batch-size 64
+  --output-dir artifacts/processed_clean_labse072_seed67_v3 `
+  --dataset-id legal_envi_clean_labse072_seed67_v3 `
+  --semantic-model sentence-transformers/LaBSE `
+  --minimum-semantic-similarity 0.72 `
+  --semantic-batch-size 64
 ```
 
 **Đầu ra:** các file segment thử nghiệm đã lọc trong một thư mục version mới.
 Không ghi đè hoặc trộn các file này với baseline
-`artifacts/processed_sklearn_seed67`.
+`artifacts/processed_clean_seed67_v2`.
 
 **Hoàn thành khi:** nhóm đã audit mẫu đúng/sai ở nhiều khoảng điểm, chọn threshold
 có lý do và không có category bị mất tỷ lệ dữ liệu bất thường.
@@ -220,7 +221,7 @@ mất năng lực dịch tổng quát ban đầu.
 - Model riêng English → Vietnamese.
 - Model riêng Vietnamese → English.
 - Baseline hiện tại chỉ train bằng
-  `artifacts/processed_sklearn_seed67/segments_train_*`.
+  `artifacts/processed_clean_seed67_v2/segments_train_*`.
 - Chọn checkpoint bằng dev set.
 - Không dùng public test để cập nhật trọng số.
 

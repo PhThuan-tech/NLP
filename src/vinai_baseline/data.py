@@ -69,7 +69,7 @@ class TranslationRecord:
 
 
 class JsonlCorpus:
-    """Load and validate the competition's semantic-clean JSONL format."""
+    """Load and validate the prepared parallel-segment JSONL format."""
 
     def __init__(
         self,
