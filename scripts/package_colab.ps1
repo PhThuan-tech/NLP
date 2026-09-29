@@ -18,6 +18,7 @@ $required = @(
     "tests",
     "docs",
     "notebooks\02_vinai_colab.ipynb",
+    "notebooks\03_vinai_kaggle.ipynb",
     "artifacts\processed_clean_seed67_v2"
 )
 
@@ -46,7 +47,46 @@ try {
     if (Test-Path -LiteralPath $output) {
         Remove-Item -LiteralPath $output -Force
     }
-    Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $output -CompressionLevel Optimal
+    # Compress-Archive stores Windows path separators (\) in entry names.
+    # Kaggle rejects those entries, so build the archive explicitly with the
+    # ZIP-standard POSIX separator (/). Colab accepts the same archive.
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipStream = [IO.File]::Open(
+        $output,
+        [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+    try {
+        $archive = [IO.Compression.ZipArchive]::new(
+            $zipStream,
+            [IO.Compression.ZipArchiveMode]::Create,
+            $false,
+            [Text.Encoding]::UTF8
+        )
+        try {
+            Get-ChildItem -LiteralPath $stage -File -Recurse -Force | ForEach-Object {
+                # Windows PowerShell 5.1 uses a .NET version without
+                # Path.GetRelativePath. Every enumerated file is a verified
+                # descendant of $stage, so a prefix slice is deterministic.
+                $relative = $_.FullName.Substring($stage.Length + 1)
+                $entryName = $relative.Replace("\", "/")
+                [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                    $archive,
+                    $_.FullName,
+                    $entryName,
+                    [IO.Compression.CompressionLevel]::Optimal
+                ) | Out-Null
+            }
+        }
+        finally {
+            $archive.Dispose()
+        }
+    }
+    finally {
+        $zipStream.Dispose()
+    }
     $sizeMb = [math]::Round((Get-Item -LiteralPath $output).Length / 1MB, 2)
     Write-Host "Created: $output ($sizeMb MB)"
 }
