@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.metadata
 import json
 import re
 import shutil
@@ -14,6 +15,13 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Protocol, Sequence
 
 import numpy as np
+
+
+def package_version(name: str) -> str | None:
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 class SentenceEncoder(Protocol):
@@ -86,7 +94,9 @@ class FinalizationConfig:
     minimum_alignment_score: float = 0.75
     minimum_semantic_similarity: float | None = None
     semantic_model: str | None = None
+    semantic_model_revision: str = "main"
     semantic_batch_size: int = 64
+    reuse_semantic_scores: bool = False
 
     def validate(self) -> None:
         if not re.fullmatch(r"[a-z0-9_-]+", self.dataset_id):
@@ -98,8 +108,12 @@ class FinalizationConfig:
                 raise ValueError("minimum_semantic_similarity must be in [-1, 1]")
             if not self.semantic_model:
                 raise ValueError("semantic_model is required with a semantic threshold")
+        if self.semantic_model and not self.semantic_model_revision.strip():
+            raise ValueError("semantic_model_revision cannot be empty")
         if self.semantic_batch_size < 1:
             raise ValueError("semantic_batch_size must be positive")
+        if self.reuse_semantic_scores and not self.semantic_model:
+            raise ValueError("semantic_model identifies reused semantic scores")
 
 
 def normalize_for_identity(text: str) -> str:
@@ -164,6 +178,13 @@ def reverse_direction(record: dict[str, Any]) -> dict[str, Any]:
         source_word_count=record.get("target_word_count"),
         target_word_count=record.get("source_word_count"),
     )
+    for source_key, target_key in (
+        ("source_token_count", "target_token_count"),
+        ("semantic_source_token_count", "semantic_target_token_count"),
+    ):
+        if source_key in record or target_key in record:
+            result[source_key] = record.get(target_key)
+            result[target_key] = record.get(source_key)
     return result
 
 
@@ -214,21 +235,172 @@ def semantic_filter(
     rows: Sequence[dict[str, Any]],
     *,
     encoder: SentenceEncoder,
-    threshold: float,
+    threshold: float | None,
     batch_size: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for batch in batched(rows, batch_size):
         scores = score_batch(batch, encoder, batch_size)
-        for row, raw_score in zip(batch, scores, strict=True):
+        token_metadata = semantic_token_metadata(batch, encoder)
+        for row, raw_score, metadata in zip(
+            batch, scores, token_metadata, strict=True
+        ):
             score = float(raw_score)
-            scored = {**row, "semantic_similarity": score}
-            if score >= threshold:
+            scored = {**row, **metadata, "semantic_similarity": score}
+            if threshold is None or score >= threshold:
                 accepted.append(scored)
             else:
                 _reject(rejected, scored, "semantic_similarity_below_threshold")
     return accepted, rejected
+
+
+def semantic_token_metadata(
+    rows: Sequence[dict[str, Any]], encoder: SentenceEncoder
+) -> list[dict[str, Any]]:
+    """Expose SentenceTransformer truncation instead of silently hiding it."""
+
+    tokenizer = getattr(encoder, "tokenizer", None)
+    maximum = getattr(encoder, "max_seq_length", None)
+    if tokenizer is None or maximum is None:
+        return [{} for _ in rows]
+    maximum = int(maximum)
+    texts = [str(row["source"]) for row in rows] + [
+        str(row["target"]) for row in rows
+    ]
+    encoded = tokenizer(
+        texts,
+        add_special_tokens=True,
+        truncation=False,
+        padding=False,
+    )
+    lengths = [len(ids) for ids in encoded["input_ids"]]
+    split = len(rows)
+    return [
+        {
+            "semantic_source_token_count": lengths[index],
+            "semantic_target_token_count": lengths[index + split],
+            "semantic_encoder_max_seq_length": maximum,
+            "semantic_input_truncated": (
+                lengths[index] > maximum or lengths[index + split] > maximum
+            ),
+        }
+        for index in range(split)
+    ]
+
+
+def filter_existing_semantic_scores(
+    rows: Sequence[dict[str, Any]], threshold: float | None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    accepted: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("semantic_similarity") is None:
+            raise ValueError(
+                "reuse_semantic_scores was requested but a row has no "
+                f"semantic_similarity: {row.get('segment_id')}"
+            )
+        score = float(row["semantic_similarity"])
+        if threshold is None or score >= threshold:
+            accepted.append(dict(row))
+        else:
+            _reject(rejected, dict(row), "semantic_similarity_below_threshold")
+    return accepted, rejected
+
+
+def semantic_audit_report(
+    rows_by_split: dict[str, Sequence[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Summarize scored pairs without pretending a cosine score is a probability."""
+
+    bins = (-1.0, 0.60, 0.65, 0.70, 0.72, 0.75, 0.80, 0.85, 0.90, 1.000001)
+    maximums = sorted(
+        {
+            int(row["semantic_encoder_max_seq_length"])
+            for rows in rows_by_split.values()
+            for row in rows
+            if row.get("semantic_encoder_max_seq_length") is not None
+        }
+    )
+    report: dict[str, Any] = {
+        "bins": list(bins),
+        "encoder_max_seq_lengths": maximums,
+        "splits": {},
+    }
+    for split, rows in rows_by_split.items():
+        scored = [row for row in rows if row.get("semantic_similarity") is not None]
+        values = np.asarray(
+            [float(row["semantic_similarity"]) for row in scored], dtype=float
+        )
+        categories: dict[str, Any] = {}
+        for category in sorted({str(row.get("category", "unknown")) for row in scored}):
+            category_rows = [
+                row for row in scored if str(row.get("category", "unknown")) == category
+            ]
+            category_values = np.asarray(
+                [float(row["semantic_similarity"]) for row in category_rows],
+                dtype=float,
+            )
+            bin_counts = {}
+            for lower, upper in zip(bins, bins[1:]):
+                label = f"[{lower:.2f},{upper:.2f})"
+                bin_counts[label] = int(
+                    np.sum((category_values >= lower) & (category_values < upper))
+                )
+            lowest = sorted(
+                category_rows,
+                key=lambda row: (
+                    float(row["semantic_similarity"]),
+                    str(row.get("segment_id", "")),
+                ),
+            )[:5]
+            categories[category] = {
+                "records": len(category_rows),
+                "truncated_records": sum(
+                    bool(row.get("semantic_input_truncated"))
+                    for row in category_rows
+                ),
+                "truncated_rate": (
+                    100
+                    * sum(
+                        bool(row.get("semantic_input_truncated"))
+                        for row in category_rows
+                    )
+                    / len(category_rows)
+                ),
+                "p05": float(np.quantile(category_values, 0.05)),
+                "p25": float(np.quantile(category_values, 0.25)),
+                "p50": float(np.quantile(category_values, 0.50)),
+                "p75": float(np.quantile(category_values, 0.75)),
+                "p95": float(np.quantile(category_values, 0.95)),
+                "bin_counts": bin_counts,
+                "lowest_examples": [
+                    {
+                        "segment_id": row.get("segment_id"),
+                        "score": row.get("semantic_similarity"),
+                        "source_preview": str(row.get("source", ""))[:500],
+                        "target_preview": str(row.get("target", ""))[:500],
+                    }
+                    for row in lowest
+                ],
+            }
+        report["splits"][split] = {
+            "records": len(scored),
+            "truncated_records": sum(
+                bool(row.get("semantic_input_truncated")) for row in scored
+            ),
+            "truncated_rate": (
+                100
+                * sum(bool(row.get("semantic_input_truncated")) for row in scored)
+                / len(scored)
+                if scored
+                else 0.0
+            ),
+            "minimum": float(values.min()) if len(values) else None,
+            "maximum": float(values.max()) if len(values) else None,
+            "categories": categories,
+        }
+    return report
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
@@ -263,22 +435,75 @@ def finalize_dataset(
         raise FileExistsError(f"Output is not empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    parent_manifest_path = input_dir / "manifest.json"
+    parent_manifest_payload = (
+        json.loads(parent_manifest_path.read_text(encoding="utf-8"))
+        if parent_manifest_path.exists()
+        else {}
+    )
+    parent_files = parent_manifest_payload.get("files")
+    if parent_manifest_path.exists() and not isinstance(parent_files, dict):
+        raise ValueError(f"Parent manifest has no file checksum map: {parent_manifest_path}")
+    for filename, metadata in (parent_files or {}).items():
+        expected_sha256 = metadata.get("sha256") if isinstance(metadata, dict) else None
+        if not expected_sha256:
+            raise ValueError(f"Parent manifest has no SHA-256 for {filename}")
+        source_path = input_dir / filename
+        if not source_path.is_file():
+            raise FileNotFoundError(f"Parent manifest file is missing: {source_path}")
+        if sha256_file(source_path).lower() != str(expected_sha256).lower():
+            raise ValueError(f"Parent dataset checksum mismatch: {source_path}")
+    parent_seed = (parent_manifest_payload.get("split_contract", {}) or {}).get(
+        "seed"
+    )
+    if parent_seed is not None and int(parent_seed) != config.split_seed:
+        raise ValueError(
+            f"Parent split seed {parent_seed} does not match requested seed "
+            f"{config.split_seed}"
+        )
+    if config.reuse_semantic_scores:
+        parent_finalization = parent_manifest_payload.get("finalization", {}) or {}
+        if not isinstance(parent_finalization, dict):
+            raise ValueError("Parent dataset has an invalid finalization contract")
+        if (
+            parent_finalization.get("semantic_model") != config.semantic_model
+            or parent_finalization.get("semantic_model_revision")
+            != config.semantic_model_revision
+        ):
+            raise ValueError(
+                "Reused semantic scores do not match semantic model/revision "
+                "recorded by the parent dataset"
+            )
+
     splits = {
         split: read_jsonl(input_dir / f"segments_{split}_en2vi.jsonl")
         for split in ("train", "dev", "public_test")
     }
     dev_clean, dev_rejected = deterministic_filter(splits["dev"], config=config)
-    if config.minimum_semantic_similarity is not None:
-        if encoder is None:
+    if config.semantic_model is not None:
+        if encoder is None and not config.reuse_semantic_scores:
             raise ValueError("An encoder is required for semantic filtering")
-        dev_clean, semantic_rejected = semantic_filter(
-            dev_clean,
-            encoder=encoder,
-            threshold=config.minimum_semantic_similarity,
-            batch_size=config.semantic_batch_size,
-        )
+        if config.reuse_semantic_scores:
+            dev_clean, semantic_rejected = filter_existing_semantic_scores(
+                dev_clean, config.minimum_semantic_similarity
+            )
+        else:
+            dev_clean, semantic_rejected = semantic_filter(
+                dev_clean,
+                encoder=encoder,
+                threshold=config.minimum_semantic_similarity,
+                batch_size=config.semantic_batch_size,
+            )
         dev_rejected.extend(semantic_rejected)
 
+    # During score-only audit the semantic threshold is intentionally unknown.
+    # Keep deterministic train rows available so freeze can recover a train row
+    # when the colliding dev row is later rejected by the chosen threshold.
+    semantic_audit_only = (
+        config.semantic_model is not None
+        and config.minimum_semantic_similarity is None
+        and not config.reuse_semantic_scores
+    )
     # Dev is finalized first so only examples that remain in the frozen benchmark
     # reserve matching source/target texts from training.
     dev_sources = {normalize_for_identity(row["source"]) for row in dev_clean}
@@ -286,8 +511,8 @@ def finalize_dataset(
     train_clean, train_rejected = deterministic_filter(
         splits["train"],
         config=config,
-        forbidden_sources=dev_sources,
-        forbidden_targets=dev_targets,
+        forbidden_sources=None if semantic_audit_only else dev_sources,
+        forbidden_targets=None if semantic_audit_only else dev_targets,
     )
     public_clean, public_rejected = deterministic_filter(
         splits["public_test"], config=config
@@ -299,14 +524,19 @@ def finalize_dataset(
         "dev": dev_rejected,
         "public_test": public_rejected,
     }
-    if config.minimum_semantic_similarity is not None:
+    if config.semantic_model is not None:
         for split in ("train", "public_test"):
-            clean[split], semantic_rejected = semantic_filter(
-                clean[split],
-                encoder=encoder,
-                threshold=config.minimum_semantic_similarity,
-                batch_size=config.semantic_batch_size,
-            )
+            if config.reuse_semantic_scores:
+                clean[split], semantic_rejected = filter_existing_semantic_scores(
+                    clean[split], config.minimum_semantic_similarity
+                )
+            else:
+                clean[split], semantic_rejected = semantic_filter(
+                    clean[split],
+                    encoder=encoder,
+                    threshold=config.minimum_semantic_similarity,
+                    batch_size=config.semantic_batch_size,
+                )
             rejected[split].extend(semantic_rejected)
     empty_splits = [split for split, rows in clean.items() if not rows]
     if empty_splits:
@@ -331,6 +561,26 @@ def finalize_dataset(
             Counter(row["finalization_rejection_reason"] for row in rejected[split])
         )
 
+    semantic_audit = None
+    if config.semantic_model is not None:
+        semantic_audit = semantic_audit_report(
+            {
+                split: [
+                    *clean[split],
+                    *[
+                        row
+                        for row in rejected[split]
+                        if row.get("semantic_similarity") is not None
+                    ],
+                ]
+                for split in ("train", "dev", "public_test")
+            }
+        )
+        (output_dir / "semantic_audit.json").write_text(
+            json.dumps(semantic_audit, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     source_split = input_dir / "document_splits.csv"
     if source_split.exists():
         shutil.copy2(source_split, output_dir / "document_splits.csv")
@@ -344,11 +594,11 @@ def finalize_dataset(
                 entry["records"] = counts[count_key]
             files[path.name] = entry
 
-    parent_manifest = input_dir / "manifest.json"
+    parent_manifest = parent_manifest_path
     manifest = {
         "dataset_id": config.dataset_id,
         "parent_dataset": (
-            json.loads(parent_manifest.read_text(encoding="utf-8")).get("dataset_id")
+            parent_manifest_payload.get("dataset_id")
             if parent_manifest.exists()
             else None
         ),
@@ -356,6 +606,12 @@ def finalize_dataset(
             sha256_file(parent_manifest) if parent_manifest.exists() else None
         ),
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "sentence_transformers_version": (
+            package_version("sentence-transformers")
+            if config.semantic_model is not None
+            else None
+        ),
+        "semantic_audit_only": semantic_audit_only,
         "split_contract": {
             "method": "sklearn.model_selection.train_test_split",
             "unit": "duplicate_group",
@@ -366,6 +622,7 @@ def finalize_dataset(
         "finalization": asdict(config),
         "counts": counts,
         "rejection_reasons": rejection_reasons,
+        "semantic_audit": semantic_audit,
         "files": files,
     }
     (output_dir / "manifest.json").write_text(
@@ -382,8 +639,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--split-seed", type=int, default=67)
     parser.add_argument("--minimum-alignment-score", type=float, default=0.75)
     parser.add_argument("--semantic-model")
+    parser.add_argument("--semantic-model-revision", default="main")
     parser.add_argument("--minimum-semantic-similarity", type=float)
     parser.add_argument("--semantic-batch-size", type=int, default=64)
+    parser.add_argument("--reuse-semantic-scores", action="store_true")
     parser.add_argument("--device")
     parser.add_argument("--overwrite", action="store_true")
     return parser
@@ -397,17 +656,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         minimum_alignment_score=args.minimum_alignment_score,
         minimum_semantic_similarity=args.minimum_semantic_similarity,
         semantic_model=args.semantic_model,
+        semantic_model_revision=args.semantic_model_revision,
         semantic_batch_size=args.semantic_batch_size,
+        reuse_semantic_scores=args.reuse_semantic_scores,
     )
     encoder = None
-    if args.minimum_semantic_similarity is not None:
+    if args.semantic_model is not None and not args.reuse_semantic_scores:
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as error:
             raise SystemExit(
                 "Install requirements-semantic.txt for semantic filtering"
             ) from error
-        encoder = SentenceTransformer(args.semantic_model, device=args.device)
+        encoder = SentenceTransformer(
+            args.semantic_model,
+            revision=args.semantic_model_revision,
+            device=args.device,
+        )
     manifest = finalize_dataset(
         args.input_dir,
         args.output_dir,

@@ -1,6 +1,11 @@
+import ast
+import contextlib
+import io
 import json
+import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +13,7 @@ import numpy as np
 
 from src.vinai_baseline.config import ExperimentConfig
 from src.vinai_baseline.compare_runs import comparable_rows
+from src.vinai_baseline.create_configs import create_configs
 from src.vinai_baseline.data import (
     DynamicSeq2SeqCollator,
     JsonlCorpus,
@@ -16,9 +22,17 @@ from src.vinai_baseline.data import (
     write_json,
 )
 from src.vinai_baseline.metrics import (
+    TranslationMetricSuite,
+    canonicalize_number,
+    extract_legal_identifiers,
     extract_numbers,
     extract_references,
     preservation_metrics,
+)
+from src.vinai_baseline.inference import (
+    assemble_document,
+    markdown_structure_report,
+    split_markdown_document,
 )
 from src.vinai_baseline.runner import BaselineRunner
 
@@ -68,6 +82,21 @@ def record(segment_id: str, source: str, target: str) -> TranslationRecord:
 
 
 class ConfigTests(unittest.TestCase):
+    def test_v3_config_generator_preserves_seed_and_uses_error_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "configs"
+            report = create_configs(
+                project_root=Path.cwd(),
+                dataset_dir=Path("artifacts/processed_clean_seed67_v2"),
+                output_dir=output,
+            )
+            generated = ExperimentConfig.from_json(output / "en2vi_lora.json")
+            self.assertEqual(report["split_seed"], 67)
+            self.assertEqual(generated.seed, 67)
+            self.assertEqual(generated.training.learning_rate, 5e-5)
+            self.assertEqual(generated.training.checkpoint_eval_samples, 256)
+            self.assertEqual(generated.data.overlength_policy, "error")
+
     def test_all_repository_configs_are_valid(self):
         for path in Path("configs/vinai").glob("*.json"):
             with self.subTest(path=path):
@@ -214,6 +243,22 @@ class TokenAuditTests(unittest.TestCase):
 
 
 class LegalMetricTests(unittest.TestCase):
+    def test_short_output_is_not_flagged_as_dominant_token_degeneration(self):
+        self.assertEqual(TranslationMetricSuite._dominant_token_rate("very short output"), 0.0)
+
+    def test_legal_document_identifiers_are_canonicalized(self):
+        source = "Law No. 63 / 2025 / QH15 and Decree 15/2020/NĐ-CP"
+        target = "Luật số 63/2025/qh15 và Nghị định 15/2020/NĐ–CP"
+        self.assertEqual(extract_legal_identifiers(source), extract_legal_identifiers(target))
+
+    def test_english_and_vietnamese_thousands_separators_compare_equal(self):
+        self.assertEqual(canonicalize_number("10,000,000"), "10000000")
+        self.assertEqual(canonicalize_number("10.000.000"), "10000000")
+        self.assertEqual(
+            extract_numbers("VND 10,000,000"),
+            extract_numbers("10.000.000 đồng"),
+        )
+
     def test_vietnamese_legal_references_are_canonicalized(self):
         self.assertEqual(
             extract_references("Điều 15, khoản 2, điểm đ Chương IV"),
@@ -305,6 +350,31 @@ class ComparisonTests(unittest.TestCase):
 
 
 class OutputSafetyTests(unittest.TestCase):
+    def test_checkpoint_subset_is_category_proportional_and_document_capped(self):
+        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config.training.checkpoint_eval_samples = 20
+        config.training.checkpoint_max_per_document = 6
+        records = []
+        for category, total in (("A", 70), ("B", 30)):
+            for index in range(total):
+                records.append(
+                    TranslationRecord(
+                        segment_id=f"{category}-{index:03d}",
+                        sample_id=f"{category}/doc-{index // 5}",
+                        source=f"source {index}",
+                        target=f"target {index}",
+                        direction="en2vi",
+                        category=category,
+                    )
+                )
+        dataset, report = BaselineRunner(config)._checkpoint_validation_dataset(
+            SimpleNamespace(records=records)
+        )
+        self.assertEqual(len(dataset), 20)
+        self.assertEqual(report["category_counts"], {"A": 14, "B": 6})
+        self.assertFalse(report["document_cap_relaxed"])
+        self.assertEqual(len(report["segment_ids"]), 20)
+
     def test_checkpoint_validation_subset_is_fixed_by_seed(self):
         config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
         records = [
@@ -381,6 +451,129 @@ class OutputSafetyTests(unittest.TestCase):
             config.seed = 68
             with self.assertRaisesRegex(ValueError, "new run ID"):
                 runner._validate_audit_output_state()
+
+
+class DocumentInferenceTests(unittest.TestCase):
+    def test_document_chunking_respects_tokens_and_preserves_separators(self):
+        tokenizer = FakeTokenizer()
+        source = (
+            "Article 1. This is a short legal paragraph.\n\n"
+            "Article 2. This paragraph is deliberately longer and must be split "
+            "at a safe sentence boundary. Another sentence follows here."
+        )
+        chunks = split_markdown_document(source, tokenizer, maximum_tokens=32)
+        self.assertTrue(all(chunk.source_tokens <= 32 for chunk in chunks))
+        predictions = [f"Bản dịch {index}" for index in range(len(chunks))]
+        assembled = assemble_document(chunks, predictions)
+        self.assertIn("\n\n", assembled)
+        self.assertEqual(assembled.count("Bản dịch"), len(chunks))
+    def test_document_chunking_preserves_leading_blank_lines(self):
+        tokenizer = FakeTokenizer()
+        chunks = split_markdown_document(
+            "\n\n# Heading\n\nBody", tokenizer, maximum_tokens=32
+        )
+        assembled = assemble_document(chunks, ["# Tiêu đề", "Nội dung"])
+        self.assertTrue(assembled.startswith("\n\n# Tiêu đề"))
+        self.assertEqual(assembled, "\n\n# Tiêu đề\n\nNội dung\n")
+
+    def test_markdown_structure_report_flags_marker_changes(self):
+        source = "# Heading\n\n- One\n- Two\n\n[Link](https://example.com)"
+        output = "# Tiêu đề\n\nMột\nHai\n\n[Liên kết](https://example.com)"
+        report = markdown_structure_report(source, output)
+        self.assertFalse(report["structure_counts_match"])
+        self.assertEqual(
+            report["mismatches"]["unordered_list_items"],
+            {"source": 2, "output": 0},
+        )
+
+
+class KaggleNotebookTests(unittest.TestCase):
+    @staticmethod
+    def _input_cell() -> str:
+        notebook = json.loads(
+            Path("notebooks/03_vinai_kaggle.ipynb").read_text(encoding="utf-8")
+        )
+        return next(
+            "".join(cell.get("source", []))
+            for cell in notebook["cells"]
+            if cell.get("cell_type") == "code"
+            and "INPUT_NAME_HINT" in "".join(cell.get("source", []))
+        )
+
+    @staticmethod
+    def _make_minimal_project(root: Path) -> None:
+        (root / "src/vinai_baseline").mkdir(parents=True)
+        (root / "configs/vinai").mkdir(parents=True)
+        (root / "requirements-training.txt").write_text("", encoding="utf-8")
+        (root / "src/vinai_baseline/cli.py").write_text("", encoding="utf-8")
+        (root / "configs/vinai/dummy.json").write_text("{}", encoding="utf-8")
+
+    def _execute_input_cell(self, input_root: Path, working_root: Path) -> dict:
+        source = self._input_cell().replace(
+            'Path("/kaggle/input")', f'Path(r"{input_root}")'
+        ).replace(
+            'dir="/kaggle/working"', f'dir=r"{working_root}"'
+        )
+        namespace = {"os": os}
+        original = Path.cwd()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                exec(compile(source, "kaggle-input-cell", "exec"), namespace)
+        finally:
+            os.chdir(original)
+        return namespace
+
+    def test_kaggle_notebook_supports_extracted_input_and_v3_freeze(self):
+        path = Path("notebooks/03_vinai_kaggle.ipynb")
+        notebook = json.loads(path.read_text(encoding="utf-8"))
+        code = "\n".join(
+            "".join(cell.get("source", []))
+            for cell in notebook["cells"]
+            if cell.get("cell_type") == "code"
+        )
+        self.assertIn("direct_candidates", code)
+        self.assertIn("zip_candidates", code)
+        self.assertIn("RUN_V3_SEMANTIC_AUDIT", code)
+        self.assertIn("--reuse-semantic-scores", code)
+        self.assertIn('DATASET_PROFILE = "v2"', code)
+        self.assertIn('"v2": "legal_envi_clean_seed67_v2"', code)
+        self.assertIn('get("seed") != 67', code)
+        self.assertIn('get("semantic_audit_only")', code)
+        for index, cell in enumerate(notebook["cells"]):
+            if cell.get("cell_type") == "code":
+                ast.parse("".join(cell.get("source", [])), filename=f"cell-{index}")
+
+    def test_kaggle_input_cell_accepts_auto_extracted_dataset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input/dataset/project"
+            source.mkdir(parents=True)
+            self._make_minimal_project(source)
+            working = root / "working"
+            working.mkdir()
+            result = self._execute_input_cell(root / "input", working)
+            project = Path(result["PROJECT_DIR"])
+            self.assertEqual(result["input_mode"], "Kaggle Dataset đã giải nén")
+            self.assertTrue((project / "src/vinai_baseline/cli.py").is_file())
+
+    def test_kaggle_input_cell_accepts_zip_dataset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            self._make_minimal_project(source)
+            input_root = root / "input"
+            input_root.mkdir()
+            with zipfile.ZipFile(input_root / "NLP_v3_parent.zip", "w") as archive:
+                for path in source.rglob("*"):
+                    if path.is_file():
+                        archive.write(path, path.relative_to(source).as_posix())
+            working = root / "working"
+            working.mkdir()
+            result = self._execute_input_cell(input_root, working)
+            project = Path(result["PROJECT_DIR"])
+            self.assertTrue(str(result["input_mode"]).startswith("ZIP:"))
+            self.assertTrue((project / "src/vinai_baseline/cli.py").is_file())
 
 
 if __name__ == "__main__":

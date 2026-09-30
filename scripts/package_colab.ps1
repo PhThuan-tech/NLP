@@ -1,25 +1,34 @@
 [CmdletBinding()]
 param(
-    [string]$OutputPath = "NLP_colab.zip"
+    [string]$OutputPath = "NLP_colab.zip",
+    [string]$DatasetPath = "artifacts\processed_clean_seed67_v2"
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $output = [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputPath))
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("nlp_colab_" + [guid]::NewGuid())
+$datasetAbsolute = (Resolve-Path -LiteralPath (Join-Path $projectRoot $DatasetPath)).Path
+$projectPrefix = $projectRoot.TrimEnd("\") + "\"
+if (-not $datasetAbsolute.StartsWith($projectPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "DatasetPath must stay inside the project: $datasetAbsolute"
+}
+$datasetRelative = $datasetAbsolute.Substring($projectPrefix.Length)
 
 $required = @(
     "README",
     "requirements.txt",
     "requirements-training.txt",
     "requirements-training-colab.txt",
+    "requirements-semantic.txt",
     "configs",
     "src",
     "tests",
     "docs",
+    "scripts",
     "notebooks\02_vinai_colab.ipynb",
     "notebooks\03_vinai_kaggle.ipynb",
-    "artifacts\processed_clean_seed67_v2"
+    $datasetRelative
 )
 
 try {

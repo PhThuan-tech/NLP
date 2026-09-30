@@ -5,9 +5,13 @@ venv/
 __pycache__/
 *.py[cod]
 NLP_colab.zip
+NLP_*.zip
+*_result.zip
 
 # Generated intermediate data; keep local and do not upload to Git.
 artifacts/processed/
+artifacts/processed_token*_parent/
+artifacts/processed_semantic_audit*/
 
 # Local training outputs and model caches.
 outputs/

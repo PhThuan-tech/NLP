@@ -234,6 +234,10 @@ python -m src.data.prepare `
   --seed 67
 ```
 
+> Quy trình hiện hành không lọc thẳng bằng một threshold giả định. Dùng ba stage
+> `prepare → audit → freeze` trong `docs/improvement_workflow.md`. Lệnh dưới đây
+> chỉ được giữ làm ví dụ API cũ, không dùng để tạo frozen v3 của nhóm.
+
 Có thể chạy semantic filtering như một thí nghiệm riêng (nên dùng GPU):
 
 ```powershell

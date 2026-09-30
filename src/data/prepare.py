@@ -20,7 +20,7 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator, Sequence
+from typing import Any, Callable, Iterable, Iterator, Sequence
 
 import numpy as np
 import pandas as pd
@@ -67,6 +67,9 @@ class PreparationConfig:
     minimum_alignment_score: float = 0.75
     maximum_block_words: int = 550
     maximum_chunk_words: int = 400
+    maximum_chunk_tokens: int | None = None
+    tokenizer_model: str | None = None
+    tokenizer_revision: str | None = None
     lookahead_weight: float = 0.20
 
     def validate(self) -> None:
@@ -80,6 +83,12 @@ class PreparationConfig:
             raise ValueError("maximum_block_words is unexpectedly small")
         if self.maximum_chunk_words < 16:
             raise ValueError("maximum_chunk_words is unexpectedly small")
+        if self.maximum_chunk_tokens is not None and self.maximum_chunk_tokens < 32:
+            raise ValueError("maximum_chunk_tokens is unexpectedly small")
+        if bool(self.maximum_chunk_tokens) != bool(self.tokenizer_model):
+            raise ValueError(
+                "maximum_chunk_tokens and tokenizer_model must be provided together"
+            )
 
 
 @dataclass(frozen=True)
@@ -106,6 +115,31 @@ class Alignment:
     operation: str
     accepted: bool
     rejection_reason: str | None
+
+
+class TokenizerTokenCounter:
+    """Fast tokenizer-backed counter with a batched path for dataset creation."""
+
+    def __init__(self, tokenizer: Any, batch_size: int = 256) -> None:
+        self.tokenizer = tokenizer
+        self.batch_size = batch_size
+
+    def __call__(self, text: str) -> int:
+        return self.count_many([text])[0]
+
+    def count_many(self, texts: Sequence[str]) -> list[int]:
+        lengths: list[int] = []
+        for start in range(0, len(texts), self.batch_size):
+            batch = list(texts[start : start + self.batch_size])
+            encoded = self.tokenizer(
+                batch,
+                add_special_tokens=True,
+                truncation=False,
+                padding=False,
+                verbose=False,
+            )
+            lengths.extend(len(ids) for ids in encoded["input_ids"])
+        return lengths
 
 
 class UnionFind:
@@ -876,15 +910,46 @@ def align_blocks(
 def pack_alignments(
     alignments: Sequence[Alignment],
     maximum_words: int,
+    *,
+    maximum_tokens: int | None = None,
+    token_counter: Callable[[str], int] | None = None,
 ) -> Iterator[dict[str, object]]:
-    """Pack adjacent accepted blocks without crossing a rejected alignment."""
+    """Pack accepted blocks under word and optional exact tokenizer budgets."""
+
+    if bool(maximum_tokens) != bool(token_counter):
+        raise ValueError("maximum_tokens and token_counter must be supplied together")
 
     buffer: list[Alignment] = []
     en_words = 0
     vi_words = 0
+    en_tokens = 0
+    vi_tokens = 0
+    accepted = [alignment for alignment in alignments if alignment.accepted]
+    token_lengths: dict[int, tuple[int, int]] = {}
+
+    def count_pair(english: str, vietnamese: str) -> tuple[int, int]:
+        if token_counter is None:
+            return 0, 0
+        count_many = getattr(token_counter, "count_many", None)
+        if callable(count_many):
+            values = count_many([english, vietnamese])
+            return int(values[0]), int(values[1])
+        return int(token_counter(english)), int(token_counter(vietnamese))
+
+    if token_counter is not None:
+        count_many = getattr(token_counter, "count_many", None)
+        if callable(count_many):
+            en_lengths = count_many([alignment.english for alignment in accepted])
+            vi_lengths = count_many([alignment.vietnamese for alignment in accepted])
+            token_lengths = {
+                id(alignment): (en_length, vi_length)
+                for alignment, en_length, vi_length in zip(
+                    accepted, en_lengths, vi_lengths, strict=True
+                )
+            }
 
     def emit() -> dict[str, object] | None:
-        nonlocal buffer, en_words, vi_words
+        nonlocal buffer, en_words, vi_words, en_tokens, vi_tokens
         if not buffer:
             return None
         result = {
@@ -897,10 +962,14 @@ def pack_alignments(
             "vi_block_start": buffer[0].vi_start,
             "vi_block_end": buffer[-1].vi_end,
             "alignment_operations": [item.operation for item in buffer],
+            "english_token_count": en_tokens if maximum_tokens is not None else None,
+            "vietnamese_token_count": vi_tokens if maximum_tokens is not None else None,
         }
         buffer = []
         en_words = 0
         vi_words = 0
+        en_tokens = 0
+        vi_tokens = 0
         return result
 
     for alignment in alignments:
@@ -911,17 +980,55 @@ def pack_alignments(
             continue
         current_en_words = len(WORD_RE.findall(alignment.english))
         current_vi_words = len(WORD_RE.findall(alignment.vietnamese))
+        if token_counter:
+            cached_lengths = token_lengths.get(id(alignment))
+            if cached_lengths is None:
+                cached_lengths = (
+                    token_counter(alignment.english),
+                    token_counter(alignment.vietnamese),
+                )
+            current_en_tokens, current_vi_tokens = cached_lengths
+        else:
+            current_en_tokens, current_vi_tokens = 0, 0
+        if maximum_tokens is not None and (
+            current_en_tokens > maximum_tokens or current_vi_tokens > maximum_tokens
+        ):
+            raise ValueError(
+                "A single accepted alignment exceeds maximum_chunk_tokens "
+                f"({current_en_tokens}/{current_vi_tokens} > {maximum_tokens}). "
+                "Lower maximum_block_words or improve logical-block splitting."
+            )
+        candidate_en_tokens = current_en_tokens
+        candidate_vi_tokens = current_vi_tokens
+        if buffer and maximum_tokens is not None:
+            candidate_en_tokens, candidate_vi_tokens = count_pair(
+                "\n\n".join([*(item.english for item in buffer), alignment.english]),
+                "\n\n".join(
+                    [*(item.vietnamese for item in buffer), alignment.vietnamese]
+                ),
+            )
         would_overflow = buffer and (
             en_words + current_en_words > maximum_words
             or vi_words + current_vi_words > maximum_words
+            or (
+                maximum_tokens is not None
+                and (
+                    candidate_en_tokens > maximum_tokens
+                    or candidate_vi_tokens > maximum_tokens
+                )
+            )
         )
         if would_overflow:
             pending = emit()
             if pending is not None:
                 yield pending
+            candidate_en_tokens = current_en_tokens
+            candidate_vi_tokens = current_vi_tokens
         buffer.append(alignment)
         en_words += current_en_words
         vi_words += current_vi_words
+        en_tokens = candidate_en_tokens
+        vi_tokens = candidate_vi_tokens
 
     pending = emit()
     if pending is not None:
@@ -945,11 +1052,20 @@ def document_record(row: pd.Series) -> dict[str, object]:
 def segment_document(
     row: pd.Series,
     config: PreparationConfig,
+    *,
+    token_counter: Callable[[str], int] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
     en_blocks = split_logical_blocks(row["english_markdown"])
     vi_blocks = split_logical_blocks(row["vietnamese_markdown"])
     alignments = align_blocks(en_blocks, vi_blocks, config)
-    packed = list(pack_alignments(alignments, config.maximum_chunk_words))
+    packed = list(
+        pack_alignments(
+            alignments,
+            config.maximum_chunk_words,
+            maximum_tokens=config.maximum_chunk_tokens,
+            token_counter=token_counter,
+        )
+    )
     records: list[dict[str, object]] = []
     for chunk_index, item in enumerate(packed):
         common = {
@@ -1020,6 +1136,16 @@ def directional_record(record: dict[str, object], direction: str) -> dict[str, o
         "en_block_end": record["en_block_end"],
         "vi_block_start": record["vi_block_start"],
         "vi_block_end": record["vi_block_end"],
+        "source_token_count": (
+            record.get("english_token_count")
+            if direction == "en2vi"
+            else record.get("vietnamese_token_count")
+        ),
+        "target_token_count": (
+            record.get("vietnamese_token_count")
+            if direction == "en2vi"
+            else record.get("english_token_count")
+        ),
     }
 
 
@@ -1085,9 +1211,14 @@ def prepare_dataset(
     output_dir: Path,
     config: PreparationConfig | None = None,
     overwrite: bool = False,
+    token_counter: Callable[[str], int] | None = None,
 ) -> dict[str, object]:
     config = config or PreparationConfig()
     config.validate()
+    if config.maximum_chunk_tokens is not None and token_counter is None:
+        raise ValueError(
+            "token_counter is required when maximum_chunk_tokens is configured"
+        )
     ensure_output_paths(output_dir, overwrite)
 
     raw_train = load_parallel_csv(train_csv)
@@ -1130,7 +1261,9 @@ def prepare_dataset(
 
         split_segments: list[dict[str, object]] = []
         for _, row in frame.iterrows():
-            records, rejected, stats = segment_document(row, config)
+            records, rejected, stats = segment_document(
+                row, config, token_counter=token_counter
+            )
             split_segments.extend(records)
             all_rejected.extend({"split": split_name, **item} for item in rejected)
             all_stats.append({"split": split_name, **stats})
@@ -1236,7 +1369,11 @@ def prepare_dataset(
         "notes": [
             "Split uses sklearn train_test_split with stratify=category and random_state=seed at duplicate-group level before segmentation.",
             "Alignment is heuristic; inspect rejection and alignment reports before training.",
-            "Word counts are whitespace approximations, not pretrained-model token counts.",
+            (
+                "Chunks are constrained by the recorded tokenizer token budget."
+                if config.maximum_chunk_tokens is not None
+                else "Word counts are whitespace approximations, not pretrained-model token counts."
+            ),
         ],
     }
     write_json(output_dir / "manifest.json", manifest)
@@ -1257,6 +1394,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-alignment-score", type=float, default=0.75)
     parser.add_argument("--maximum-block-words", type=int, default=550)
     parser.add_argument("--maximum-chunk-words", type=int, default=400)
+    parser.add_argument("--maximum-chunk-tokens", type=int)
+    parser.add_argument("--tokenizer-model")
+    parser.add_argument("--tokenizer-revision")
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
@@ -1279,13 +1419,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         minimum_alignment_score=args.minimum_alignment_score,
         maximum_block_words=args.maximum_block_words,
         maximum_chunk_words=args.maximum_chunk_words,
+        maximum_chunk_tokens=args.maximum_chunk_tokens,
+        tokenizer_model=args.tokenizer_model,
+        tokenizer_revision=args.tokenizer_revision,
     )
+    token_counter = None
+    if args.tokenizer_model:
+        try:
+            from transformers import AutoTokenizer
+        except ImportError as error:
+            raise SystemExit(
+                "Install requirements-training.txt for token-aware chunking"
+            ) from error
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.tokenizer_model,
+            revision=args.tokenizer_revision,
+            use_fast=True,
+        )
+
+        token_counter = TokenizerTokenCounter(tokenizer)
+
     manifest = prepare_dataset(
         train_csv=train_csv,
         public_test_csv=public_test_csv,
         output_dir=output_dir,
         config=config,
         overwrite=args.overwrite,
+        token_counter=token_counter,
     )
     print(json.dumps(manifest["counts"], ensure_ascii=False, indent=2))
     print(f"Prepared data written to: {output_dir}")

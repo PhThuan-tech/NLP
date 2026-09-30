@@ -9,6 +9,7 @@ import math
 import platform
 import sys
 import time
+from collections import Counter, defaultdict
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -164,6 +165,11 @@ class BaselineRunner:
         if not manifest_path.is_file():
             raise FileNotFoundError(f"Dataset manifest not found: {manifest_path}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("semantic_audit_only"):
+            raise ValueError(
+                "This dataset is a score-only semantic audit and may contain "
+                "train/dev overlap. Freeze it before training or evaluation."
+            )
         actual_id = manifest.get("dataset_id")
         if actual_id != data.dataset_id:
             raise ValueError(
@@ -344,32 +350,116 @@ class BaselineRunner:
         self,
         validation: PreparedCorpus,
     ) -> tuple[TranslationDataset, dict[str, Any]]:
-        """Select a stable dev subset for checkpoint choice; final eval stays full."""
+        """Select a stable, category-stratified dev subset for checkpoint choice."""
         requested = self.config.training.checkpoint_eval_samples
         count = min(requested or len(validation.records), len(validation.records))
-        ranked = sorted(
-            validation.records,
-            key=lambda record: hashlib.sha256(
+        by_category: dict[str, list[Any]] = defaultdict(list)
+        for record in validation.records:
+            by_category[record.category or "unknown"].append(record)
+
+        total = len(validation.records)
+        exact_quotas = {
+            category: count * len(records) / total
+            for category, records in by_category.items()
+        }
+        quotas = {
+            category: min(len(by_category[category]), int(math.floor(value)))
+            for category, value in exact_quotas.items()
+        }
+        # When the subset is large enough, keep every present category visible.
+        if count >= len(by_category):
+            for category in quotas:
+                quotas[category] = max(1, quotas[category])
+        while sum(quotas.values()) < count:
+            candidates = [
+                category
+                for category in by_category
+                if quotas[category] < len(by_category[category])
+            ]
+            category = max(
+                candidates,
+                key=lambda value: (
+                    exact_quotas[value] - quotas[value],
+                    len(by_category[value]),
+                    value,
+                ),
+            )
+            quotas[category] += 1
+        while sum(quotas.values()) > count:
+            candidates = [category for category in by_category if quotas[category] > 1]
+            category = min(
+                candidates,
+                key=lambda value: (
+                    exact_quotas[value] - quotas[value],
+                    len(by_category[value]),
+                    value,
+                ),
+            )
+            quotas[category] -= 1
+
+        def rank(record: Any) -> bytes:
+            return hashlib.sha256(
                 f"{self.config.seed}:{record.segment_id}".encode("utf-8")
-            ).digest(),
-        )
-        selected = ranked[:count]
+            ).digest()
+
+        document_limit = self.config.training.checkpoint_max_per_document
+        document_counts: Counter[str] = Counter()
+        selected: list[Any] = []
+        selected_ids_set: set[str] = set()
+        for category in sorted(by_category):
+            needed = quotas[category]
+            if needed <= 0:
+                continue
+            ranked = sorted(by_category[category], key=rank)
+            for record in ranked:
+                document = record.sample_id or record.segment_id.split("::", 1)[0]
+                if document_limit is not None and document_counts[document] >= document_limit:
+                    continue
+                selected.append(record)
+                selected_ids_set.add(record.segment_id)
+                document_counts[document] += 1
+                if sum(
+                    (item.category or "unknown") == category for item in selected
+                ) >= needed:
+                    break
+
+        # Very small categories/documents can make a strict cap impossible. Fill
+        # deterministically and report that relaxation instead of returning fewer rows.
+        cap_relaxed = len(selected) < count
+        if cap_relaxed:
+            for record in sorted(validation.records, key=rank):
+                if record.segment_id in selected_ids_set:
+                    continue
+                selected.append(record)
+                selected_ids_set.add(record.segment_id)
+                if len(selected) >= count:
+                    break
+        selected = selected[:count]
         selected_ids = sorted(record.segment_id for record in selected)
         fingerprint = hashlib.sha256(
             "\n".join(selected_ids).encode("utf-8")
         ).hexdigest()
         category_counts: dict[str, int] = {}
+        selected_document_counts: Counter[str] = Counter()
         for record in selected:
             category = record.category or "unknown"
             category_counts[category] = category_counts.get(category, 0) + 1
+            selected_document_counts[
+                record.sample_id or record.segment_id.split("::", 1)[0]
+            ] += 1
         report = {
-            "selection_method": "sha256(seed:segment_id)",
+            "selection_method": "category-proportional + sha256(seed:segment_id)",
             "seed": self.config.seed,
             "requested_records": requested,
             "selected_records": len(selected),
             "full_validation_records": len(validation.records),
             "segment_ids_sha256": fingerprint,
+            "segment_ids": selected_ids,
             "category_counts": dict(sorted(category_counts.items())),
+            "category_quotas": dict(sorted(quotas.items())),
+            "selected_documents": len(selected_document_counts),
+            "maximum_records_per_document": document_limit,
+            "document_cap_relaxed": cap_relaxed,
         }
         return TranslationDataset(selected), report
 
@@ -407,7 +497,11 @@ class BaselineRunner:
             metric_for_best_model=train.metric_for_best_model if load_best else None,
             greater_is_better=train.greater_is_better if load_best else None,
             predict_with_generate=True,
-            generation_max_length=self.config.generation.max_length,
+            generation_max_length=(
+                None
+                if self.config.generation.max_new_tokens is not None
+                else self.config.generation.max_length
+            ),
             generation_num_beams=self.config.generation.num_beams,
             dataloader_num_workers=train.dataloader_num_workers,
             dataloader_pin_memory=True,
@@ -674,11 +768,17 @@ class BaselineRunner:
         with torch.inference_mode():
             output_ids = model.generate(
                 **inputs,
-                max_length=self.config.generation.max_length,
                 num_beams=self.config.generation.num_beams,
                 length_penalty=self.config.generation.length_penalty,
+                repetition_penalty=self.config.generation.repetition_penalty,
                 no_repeat_ngram_size=self.config.generation.no_repeat_ngram_size,
                 early_stopping=self.config.generation.early_stopping,
+                renormalize_logits=self.config.generation.renormalize_logits,
+                **(
+                    {"max_new_tokens": self.config.generation.max_new_tokens}
+                    if self.config.generation.max_new_tokens is not None
+                    else {"max_length": self.config.generation.max_length}
+                ),
             )
         prediction = tokenizer.batch_decode(
             output_ids, skip_special_tokens=True
@@ -833,6 +933,13 @@ class BaselineRunner:
             category_metrics,
         )
         validation_metrics = dict(prediction_output.metrics)
+        source_preservation = metric_suite.score_source_preservation(
+            predictions,
+            [record.source for record in validation.records],
+        )
+        validation_metrics.update(
+            {f"validation_{key}": value for key, value in source_preservation.items()}
+        )
         validation_metrics["peak_vram_mb"] = round(peak_vram_mb, 3)
         validation_metrics["evaluated_records"] = len(validation.records)
         validation_metrics["parameter_report"] = parameter_report.to_dict()
@@ -868,11 +975,16 @@ class BaselineRunner:
             ]
             category_predictions = [predictions[index] for index in indices]
             category_references = [records[index].target for index in indices]
+            category_sources = [records[index].source for index in indices]
             output[category] = {
                 "records": len(indices),
                 **metric_suite.score_texts(
                     category_predictions,
                     category_references,
+                ),
+                **metric_suite.score_source_preservation(
+                    category_predictions,
+                    category_sources,
                 ),
             }
         return output

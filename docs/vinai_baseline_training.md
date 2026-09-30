@@ -364,11 +364,15 @@ output_dir/
 
 ## 12. Hyperparameter nào nên chỉnh trước
 
+Sau khi đã có E0/E1 v2, dùng `docs/improvement_workflow.md`. Generation sweep
+được chạy trên adapter đã có trước khi tạo v3; semantic threshold phải qua audit,
+và config v3 được sinh tự động để khóa seed/dataset/generation.
+
 Giữ cố định dataset/dev split và thay một yếu tố mỗi thí nghiệm:
 
 1. chạy zero-shot beam 2;
 2. chạy LoRA mặc định;
-3. thử learning rate `5e-5`, `1e-4`, `2e-4` nếu loss/metric chưa ổn;
+3. trên v3, thử learning rate `5e-5` trước, sau đó `2e-5`; giữ `1e-4` là mốc v2;
 4. thử LoRA rank 8/16/32;
 5. so beam 1/2/4 trên cùng checkpoint để tìm cân bằng chất lượng–tốc độ;
 6. chỉ sau đó chạy full fine-tuning;

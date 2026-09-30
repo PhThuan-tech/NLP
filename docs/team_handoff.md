@@ -1,5 +1,9 @@
 # Hướng dẫn bàn giao và kế thừa dự án
 
+> Sau E0/E1 trên dataset v2, dùng `docs/improvement_workflow.md` làm quy trình
+> chính cho vòng v3. Không tự chọn semantic threshold hoặc đổi generation config
+> ngoài protocol đó.
+
 Tài liệu này là điểm bắt đầu cho thành viên mới. Pipeline chính chạy trên
 Google Colab; không cần chép virtual environment từ Windows vào ZIP.
 

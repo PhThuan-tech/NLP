@@ -24,5 +24,9 @@ Thành viên mới đọc `docs/team_handoff.md` trước; tài liệu này ch�
 bàn giao và quy ước thí nghiệm nhóm. Chi tiết kỹ thuật nằm tại
 `docs/vinai_baseline_training.md`.
 
+Vòng cải thiện sau Zero-shot/LoRA v2 dùng `docs/improvement_workflow.md`:
+generation sweep không train lại, data v3 theo token, semantic audit→freeze,
+sinh config v3, merge LoRA và dịch document.
+
 Không dùng `segments_public_test_*` để train, early stopping hoặc chọn
 hyperparameter.

@@ -80,15 +80,24 @@ class DataConfig:
 class GenerationConfig:
     num_beams: int = 2
     max_length: int = 512
+    max_new_tokens: int | None = None
     length_penalty: float = 1.0
+    repetition_penalty: float = 1.0
     no_repeat_ngram_size: int = 3
     early_stopping: bool = True
+    renormalize_logits: bool = True
 
     def validate(self) -> None:
         if self.num_beams < 1:
             raise ValueError("generation.num_beams must be positive")
         if self.max_length < 8:
             raise ValueError("generation.max_length must be at least 8")
+        if self.max_new_tokens is not None and self.max_new_tokens < 8:
+            raise ValueError("generation.max_new_tokens must be at least 8")
+        if self.length_penalty <= 0:
+            raise ValueError("generation.length_penalty must be positive")
+        if self.repetition_penalty <= 0:
+            raise ValueError("generation.repetition_penalty must be positive")
         if self.no_repeat_ngram_size < 0:
             raise ValueError("generation.no_repeat_ngram_size cannot be negative")
 
@@ -133,6 +142,7 @@ class TrainingConfig:
     save_total_limit: int = 2
     dataloader_num_workers: int = 2
     checkpoint_eval_samples: int | None = None
+    checkpoint_max_per_document: int | None = 6
     early_stopping_patience: int = 2
     metric_for_best_model: str = "chrf"
     greater_is_better: bool = True
@@ -182,6 +192,13 @@ class TrainingConfig:
             and self.checkpoint_eval_samples < 1
         ):
             raise ValueError("training.checkpoint_eval_samples must be positive")
+        if (
+            self.checkpoint_max_per_document is not None
+            and self.checkpoint_max_per_document < 1
+        ):
+            raise ValueError(
+                "training.checkpoint_max_per_document must be positive"
+            )
 
 
 @dataclass

@@ -19,10 +19,16 @@ tra và lưu đủ cấu hình để thành viên khác có thể chạy lại.
 | Chuẩn hóa, deduplicate, train/dev split | Hoàn thành | `train_test_split`, stratify theo category, seed 67, ở cấp document/duplicate-group. |
 | Structural segmentation/alignment | Hoàn thành baseline | Đã thêm quality/language gate xác định ở v2. |
 | Semantic filtering | Tùy chọn, chưa dùng cho baseline hiện tại | `src.data.finalize` hỗ trợ LaBSE; phải audit threshold và tạo dataset ID mới. |
-| Tokenizer analysis | Đã có code | Chạy `audit` bằng tokenizer VinAI trên cloud GPU/CPU. |
-| Zero-shot baseline và evaluator | Đã triển khai code | Cần chạy đủ hai chiều và ghi nhận metric chính thức. |
-| Fine-tuning | Sẵn sàng chạy | Có cấu hình LoRA/full, notebook Colab và checkpoint resume. |
-| Document inference và Docker | Chưa làm | Giai đoạn sau khi model ổn định. |
+| Tokenizer analysis | Đã chạy EN→VI v2 | 632 train và 56 dev vượt 512 token; v3 chuyển sang token-aware chunking. |
+| Zero-shot baseline và evaluator | Đã chạy EN→VI v2 | BLEU/chrF++ và legal metrics đã lưu; VI→EN vẫn cần chạy. |
+| Fine-tuning | Đã chạy LoRA EN→VI v2 | Epoch 2 tốt nhất theo chrF++; chưa nên chạy full trên dữ liệu v2. |
+| Generation sweep | Đã có code | Chạy `src.vinai_baseline.sweep_cli` trên adapter hiện tại trước khi retrain. |
+| Document inference | Đã có baseline | `document_cli` chia token-aware, bucket, ghép lại và xuất report. |
+| Docker | Chưa làm | Chỉ đóng gói sau khi frozen v3 và merged model được chốt. |
+
+Quy trình thực thi hiện hành nằm ở `docs/improvement_workflow.md`. Các phần bên
+dưới giữ vai trò roadmap; khi có khác biệt, workflow mới là nguồn hướng dẫn ưu
+tiên.
 
 ## Nguyên tắc chung
 

@@ -42,7 +42,9 @@ class VinAIModelFactory:
             use_fast=True,
         )
 
-    def load_model(self) -> Any:
+    def load_model(
+        self, *, apply_lora: bool = True, for_inference: bool = False
+    ) -> Any:
         try:
             from transformers import AutoModelForSeq2SeqLM
         except ImportError as error:
@@ -58,17 +60,26 @@ class VinAIModelFactory:
         )
         generation = self.config.generation
         model.generation_config.num_beams = generation.num_beams
-        model.generation_config.max_length = generation.max_length
         model.generation_config.length_penalty = generation.length_penalty
+        model.generation_config.repetition_penalty = generation.repetition_penalty
         model.generation_config.no_repeat_ngram_size = (
             generation.no_repeat_ngram_size
         )
         model.generation_config.early_stopping = generation.early_stopping
+        model.generation_config.renormalize_logits = generation.renormalize_logits
+        if generation.max_new_tokens is not None:
+            model.generation_config.max_length = None
+            model.generation_config.max_new_tokens = generation.max_new_tokens
+        else:
+            model.generation_config.max_length = generation.max_length
+            model.generation_config.max_new_tokens = None
 
-        if self.config.training.gradient_checkpointing:
+        if self.config.training.gradient_checkpointing and not for_inference:
             model.gradient_checkpointing_enable()
             model.config.use_cache = False
-        if self.config.training.mode == "lora":
+        elif for_inference:
+            model.config.use_cache = True
+        if self.config.training.mode == "lora" and apply_lora:
             model = self._apply_lora(model)
         return model
 

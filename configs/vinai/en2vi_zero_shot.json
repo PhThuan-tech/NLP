@@ -18,9 +18,12 @@
   "generation": {
     "num_beams": 2,
     "max_length": 512,
+    "max_new_tokens": null,
     "length_penalty": 1.0,
+    "repetition_penalty": 1.0,
     "no_repeat_ngram_size": 3,
-    "early_stopping": true
+    "early_stopping": true,
+    "renormalize_logits": true
   },
   "training": {
     "mode": "none",
