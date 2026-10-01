@@ -539,6 +539,8 @@ class KaggleNotebookTests(unittest.TestCase):
         self.assertIn('"v2": "legal_envi_clean_seed67_v2"', code)
         self.assertIn('get("seed") != 67', code)
         self.assertIn('get("semantic_audit_only")', code)
+        self.assertIn('Path(OUTPUT_DIR) / "logs"', code)
+        self.assertIn('"smoke_result"', code)
         for index, cell in enumerate(notebook["cells"]):
             if cell.get("cell_type") == "code":
                 ast.parse("".join(cell.get("source", [])), filename=f"cell-{index}")
