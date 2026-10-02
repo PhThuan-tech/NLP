@@ -151,8 +151,13 @@ def load_inference_model(
     elif config.training.mode == "lora":
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(saved, use_fast=True)
+        tokenizer = factory.load_tokenizer(saved)
         if (saved / "adapter_config.json").is_file():
+            adapter_metadata = json.loads((saved / "adapter_config.json").read_text(encoding="utf-8"))
+            if adapter_metadata.get("base_model_name_or_path") != config.model_name:
+                raise ValueError("Adapter base model/direction does not match the selected config")
+            if adapter_metadata.get("revision") not in (None, config.model_revision):
+                raise ValueError("Adapter base-model revision does not match config")
             try:
                 from peft import PeftModel
             except ImportError as error:
@@ -196,12 +201,15 @@ def load_inference_model(
     else:
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(saved, use_fast=True)
+        tokenizer = factory.load_tokenizer(saved)
         model = AutoModelForSeq2SeqLM.from_pretrained(
             saved,
             trust_remote_code=config.trust_remote_code,
             low_cpu_mem_usage=True,
         )
+    from .language import configure_model
+    configure_model(model, tokenizer, config.direction)
+    model.config.use_cache = True
     return tokenizer, model
 
 
@@ -218,6 +226,8 @@ def translate_chunks(
     config: ExperimentConfig,
     batch_size: int,
     device: Any,
+    fail_on_empty: bool = True,
+    log_progress: bool = False,
 ) -> tuple[list[str], dict[str, Any]]:
     """Translate length-bucketed chunks and restore their original order."""
 
@@ -231,7 +241,8 @@ def translate_chunks(
     started = time.perf_counter()
     model.to(device)
     model.eval()
-    for indices in _batches(order, batch_size):
+    total_batches = (len(order) + batch_size - 1) // batch_size
+    for batch_index, indices in enumerate(_batches(order, batch_size), start=1):
         texts = [chunks[index].source for index in indices]
         inputs = tokenizer(
             texts,
@@ -258,7 +269,11 @@ def translate_chunks(
         decoded = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
         for index, prediction in zip(indices, decoded, strict=True):
             predictions[index] = prediction.strip()
-    if any(not prediction for prediction in predictions):
+        if log_progress:
+            elapsed = time.perf_counter() - started
+            eta = elapsed / batch_index * (total_batches - batch_index)
+            print(f"GENERATE {batch_index}/{total_batches} batches | elapsed {elapsed:.0f}s | ETA {eta:.0f}s", flush=True)
+    if fail_on_empty and any(not prediction for prediction in predictions):
         empty = [index for index, value in enumerate(predictions) if not value]
         raise RuntimeError(f"Empty translations for chunks: {empty[:10]}")
     report = {

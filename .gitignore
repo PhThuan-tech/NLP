@@ -1,6 +1,7 @@
 /data/
 NLP_venv
 .venv/
+.test-deps/
 venv/
 __pycache__/
 *.py[cod]

@@ -8,17 +8,19 @@ alignment và finalization chống trùng/rò rỉ thành
 dùng `vinai/vinai-translate-en2vi-v2` và
 `vinai/vinai-translate-vi2en-v2`.
 
-## Bắt đầu nhanh trên Colab
+## Bắt đầu nhanh trên Kaggle
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/package_colab.ps1
 ```
 
-Sau đó mở `notebooks/02_vinai_colab.ipynb`, bật GPU và upload
-`NLP_colab.zip`. Notebook dùng `requirements-training-colab.txt` đã khóa phiên
-bản; PyTorch/CUDA lấy từ runtime Colab.
+Upload `NLP_colab.zip` làm Kaggle Input, mở `notebooks/03_vinai_kaggle.ipynb`,
+bật GPU và Internet. Notebook dùng `requirements-training-colab.txt` đã khóa
+phiên bản; PyTorch/CUDA lấy từ runtime GPU.
 
-Trên GPU cloud, dùng notebook chính `notebooks/02_vinai_colab.ipynb`.
+Sau bản sửa language token, đọc `docs/language_recovery.md`: zero-shot 256 mẫu
+phải pass trước smoke/full train; adapter cũ được chấm lại riêng. Notebook Colab
+vẫn có trong repo nhưng quy trình gate mới được tích hợp trên notebook Kaggle.
 
 Thành viên mới đọc `docs/team_handoff.md` trước; tài liệu này chứa cả quy trình
 bàn giao và quy ước thí nghiệm nhóm. Chi tiết kỹ thuật nằm tại

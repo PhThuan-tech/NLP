@@ -1,5 +1,9 @@
 # Quy trình cải thiện baseline sau E0/E1
 
+Trước khi áp dụng cải tiến tiếp theo, chạy quy trình sửa language control tại
+[`language_recovery.md`](language_recovery.md): zero-shot 256 → kiểm tra adapter cũ
+→ smoke/retrain LoRA V2. Kết quả lặp của run ngày 01/10 chưa phải baseline hợp lệ.
+
 Đây là quy trình chính sau khi đã có kết quả EN→VI Zero-shot và LoRA trên
 `legal_envi_clean_seed67_v2`. Không ghi đè v2 và không sửa document split.
 Split seed và training seed tiếp tục là `67`.

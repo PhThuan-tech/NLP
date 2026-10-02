@@ -313,6 +313,10 @@ class DynamicSeq2SeqCollator:
         model_inputs["decoder_input_ids"] = prepare_decoder_inputs(
             labels=model_inputs["labels"]
         )
+        expected_start = getattr(getattr(self.model, "config", None), "decoder_start_token_id", None)
+        if expected_start is not None and not torch.all(
+                model_inputs["decoder_input_ids"][:, 0] == expected_start):
+            raise ValueError("Training decoder start differs from target language; check tokenizer labels")
         return model_inputs
 
 

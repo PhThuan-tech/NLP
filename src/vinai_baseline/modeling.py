@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import ExperimentConfig
+from .language import LANGUAGES, configure_tokenizer, configure_model
 
 
 @dataclass(frozen=True)
@@ -28,19 +29,22 @@ class VinAIModelFactory:
     def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
 
-    def load_tokenizer(self) -> Any:
+    def load_tokenizer(self, saved_model_dir=None) -> Any:
         try:
             from transformers import AutoTokenizer
         except ImportError as error:
             raise RuntimeError(
                 "transformers is required; install requirements-training.txt"
             ) from error
-        return AutoTokenizer.from_pretrained(
-            self.config.model_name,
-            revision=self.config.model_revision,
+        tokenizer = AutoTokenizer.from_pretrained(
+            saved_model_dir or self.config.model_name,
+            revision=None if saved_model_dir else self.config.model_revision,
             trust_remote_code=self.config.trust_remote_code,
             use_fast=True,
+            src_lang=LANGUAGES[self.config.direction][0],
+            tgt_lang=LANGUAGES[self.config.direction][1],
         )
+        return configure_tokenizer(tokenizer, self.config.direction)
 
     def load_model(
         self, *, apply_lora: bool = True, for_inference: bool = False
@@ -58,6 +62,7 @@ class VinAIModelFactory:
             trust_remote_code=self.config.trust_remote_code,
             low_cpu_mem_usage=True,
         )
+        configure_model(model, self.load_tokenizer(), self.config.direction)
         generation = self.config.generation
         model.generation_config.num_beams = generation.num_beams
         model.generation_config.length_penalty = generation.length_penalty

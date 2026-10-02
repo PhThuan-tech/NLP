@@ -57,6 +57,8 @@ class BaselineRunner:
         ):
             path.mkdir(parents=True, exist_ok=True)
         write_json(self.output_dir / "resolved_config.json", self.config.to_dict())
+        write_json(self.output_dir / "language_control.json", {
+            "version": 1, "direction": self.config.direction})
 
     @staticmethod
     def _resume_comparable_config(payload: dict[str, Any]) -> dict[str, Any]:
@@ -101,6 +103,10 @@ class BaselineRunner:
         return checkpoint
 
     def _validate_saved_config(self) -> None:
+        language_path = self.output_dir / "language_control.json"
+        if not language_path.is_file() or json.loads(language_path.read_text(
+                encoding="utf-8")).get("version") != 1:
+            raise ValueError("Cannot resume/audit an old run without the language-control fix; train a fresh run")
         saved_path = self.output_dir / "resolved_config.json"
         if not saved_path.is_file():
             raise FileNotFoundError(
@@ -717,7 +723,7 @@ class BaselineRunner:
         return self._run(do_train=True)
 
     def verify_saved_model(self) -> dict[str, Any]:
-        """Reload a saved full model/LoRA adapter and generate one translation."""
+        """Reload and apply a degeneration gate to a stratified validation subset."""
         if self.config.training.mode == "none":
             raise ValueError("There is no saved model in zero-shot mode")
         self._validate_dataset_contract()
@@ -726,77 +732,49 @@ class BaselineRunner:
             raise FileNotFoundError(
                 f"Saved model not found: {self.best_model_dir}. Run train first."
             )
-        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
+        from transformers import set_seed
+        from .inference import load_inference_model, DocumentChunk, translate_chunks, token_length
+        from .quality import quality_report
 
         set_seed(self.config.seed)
         self._status(f"Reloading saved {self.config.training.mode} model...")
-        tokenizer = AutoTokenizer.from_pretrained(
-            self.best_model_dir,
-            trust_remote_code=self.config.trust_remote_code,
-            use_fast=True,
-        )
-        if self.config.training.mode == "lora":
-            try:
-                from peft import PeftModel
-            except ImportError as error:
-                raise RuntimeError("PEFT is required to reload a LoRA adapter") from error
-            base_model = AutoModelForSeq2SeqLM.from_pretrained(
-                self.config.model_name,
-                revision=self.config.model_revision,
-                trust_remote_code=self.config.trust_remote_code,
-                low_cpu_mem_usage=True,
-            )
-            model = PeftModel.from_pretrained(base_model, self.best_model_dir)
-        else:
-            model = AutoModelForSeq2SeqLM.from_pretrained(
-                self.best_model_dir,
-                trust_remote_code=self.config.trust_remote_code,
-                low_cpu_mem_usage=True,
-            )
-
+        tokenizer, model = load_inference_model(self.config, saved_model_dir=self.best_model_dir)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model.to(device)
-        model.eval()
-        record = self._load_records("validation")[0]
-        inputs = tokenizer(
-            record.source,
-            return_tensors="pt",
-            max_length=self.config.data.max_source_length,
-            truncation=True,
-        )
-        inputs = {name: value.to(device) for name, value in inputs.items()}
-        with torch.inference_mode():
-            output_ids = model.generate(
-                **inputs,
-                num_beams=self.config.generation.num_beams,
-                length_penalty=self.config.generation.length_penalty,
-                repetition_penalty=self.config.generation.repetition_penalty,
-                no_repeat_ngram_size=self.config.generation.no_repeat_ngram_size,
-                early_stopping=self.config.generation.early_stopping,
-                renormalize_logits=self.config.generation.renormalize_logits,
-                **(
-                    {"max_new_tokens": self.config.generation.max_new_tokens}
-                    if self.config.generation.max_new_tokens is not None
-                    else {"max_length": self.config.generation.max_length}
-                ),
-            )
-        prediction = tokenizer.batch_decode(
-            output_ids, skip_special_tokens=True
-        )[0].strip()
-        if not prediction:
-            raise RuntimeError("Reloaded model generated an empty translation")
-        report = {
-            "status": "passed",
-            "training_mode": self.config.training.mode,
-            "seed": self.config.seed,
-            "saved_model_dir": str(self.best_model_dir.resolve()),
-            "segment_id": record.segment_id,
-            "source": record.source,
-            "prediction": prediction,
-            "reference": record.target,
-        }
+        # Do not overwrite final token audit reports with a small verify audit.
+        prepared = TokenizerAuditor(tokenizer,
+            max_source_length=self.config.data.max_source_length,
+            max_target_length=self.config.data.max_target_length,
+            batch_size=self.config.data.audit_batch_size,
+            policy=self.config.data.overlength_policy).prepare(self._load_records("validation"))
+        previous = self.config.training.checkpoint_eval_samples
+        try:
+            self.config.training.checkpoint_eval_samples = 16
+            subset, _ = self._checkpoint_validation_dataset(prepared)
+        finally:
+            self.config.training.checkpoint_eval_samples = previous
+        records = subset.records
+        chunks = [DocumentChunk(index=i, source=r.source, separator_before="", separator_after="",
+                                source_tokens=token_length(tokenizer, r.source)) for i, r in enumerate(records)]
+        predictions, runtime = translate_chunks(chunks, tokenizer=tokenizer, model=model,
+            config=self.config, batch_size=min(8, self.config.training.per_device_eval_batch_size),
+            device=device, fail_on_empty=False, log_progress=True)
+        report = quality_report(predictions, [r.target for r in records], self.config.direction,
+                                [r.segment_id for r in records])
+        report.update({"training_mode": self.config.training.mode, "seed": self.config.seed,
+                       "saved_model_dir": str(self.best_model_dir.resolve()), "runtime": runtime})
+        full_gate_path = self.reports_dir / "quality_gate.json"
+        if full_gate_path.is_file():
+            full_gate = json.loads(full_gate_path.read_text(encoding="utf-8"))
+            report["full_evaluation_status"] = full_gate["status"]
+            if full_gate["status"] != "passed":
+                report["status"] = "failed"
+                report["full_evaluation_failed_records"] = full_gate["failed_records"]
+        write_jsonl(self.reports_dir / "reload_predictions.jsonl",
+                    [r.to_output_mapping(p) for r, p in zip(records, predictions, strict=True)])
         write_json(self.reports_dir / "reload_smoke.json", report)
-        self._status("Saved model reload smoke test passed")
+        if report["status"] != "passed":
+            raise RuntimeError(f"Reload quality gate failed; inspect {self.reports_dir / 'reload_smoke.json'}")
+        self._status("Saved model reload quality gate passed (not a guarantee of translation accuracy)")
         return report
 
     def _run(self, *, do_train: bool) -> dict[str, Any]:
@@ -943,6 +921,10 @@ class BaselineRunner:
         validation_metrics["peak_vram_mb"] = round(peak_vram_mb, 3)
         validation_metrics["evaluated_records"] = len(validation.records)
         validation_metrics["parameter_report"] = parameter_report.to_dict()
+        from .quality import quality_report
+        write_json(self.reports_dir / "quality_gate.json", quality_report(
+            predictions, [r.target for r in validation.records], self.config.direction,
+            [r.segment_id for r in validation.records]))
         write_json(
             self.reports_dir / "validation_metrics.json",
             validation_metrics,
@@ -1011,6 +993,7 @@ class BaselineRunner:
             pass
         return {
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "language_control_version": 1,
             "run_name": self.config.run_name,
             "direction": self.config.direction,
             "model_name": self.config.model_name,
