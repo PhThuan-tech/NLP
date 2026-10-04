@@ -2,11 +2,45 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .config import ExperimentConfig
 from .language import LANGUAGES, configure_tokenizer, configure_model
+
+
+LOCAL_MODEL_ENV = {
+    "en2vi": "VINAI_EN2VI_MODEL_DIR",
+    "vi2en": "VINAI_VI2EN_MODEL_DIR",
+}
+
+
+def offline_mode() -> bool:
+    return os.environ.get("HF_HUB_OFFLINE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def validate_local_model_dir(path: str | Path) -> Path:
+    directory = Path(path).expanduser().resolve()
+    required = ("config.json", "generation_config.json", "sentencepiece.bpe.model")
+    missing = [name for name in required if not (directory / name).is_file()]
+    weights = [
+        name
+        for name in ("model.safetensors", "pytorch_model.bin")
+        if (directory / name).is_file()
+    ]
+    if missing or not weights:
+        detail = [*missing, *([] if weights else ["model.safetensors"])]
+        raise FileNotFoundError(
+            f"Incomplete local VinAI model at {directory}; missing: {detail}"
+        )
+    return directory
 
 
 @dataclass(frozen=True)
@@ -29,6 +63,18 @@ class VinAIModelFactory:
     def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
 
+    def base_model_source(self) -> str:
+        variable = LOCAL_MODEL_ENV[self.config.direction]
+        configured = os.environ.get(variable, "").strip()
+        if configured:
+            return str(validate_local_model_dir(configured))
+        if offline_mode():
+            raise FileNotFoundError(
+                f"Offline mode requires {variable} to point to the extracted "
+                f"{self.config.model_name} snapshot"
+            )
+        return self.config.model_name
+
     def load_tokenizer(self, saved_model_dir=None) -> Any:
         try:
             from transformers import AutoTokenizer
@@ -36,13 +82,19 @@ class VinAIModelFactory:
             raise RuntimeError(
                 "transformers is required; install requirements-training.txt"
             ) from error
+        source = str(saved_model_dir) if saved_model_dir else self.base_model_source()
         tokenizer = AutoTokenizer.from_pretrained(
-            saved_model_dir or self.config.model_name,
-            revision=None if saved_model_dir else self.config.model_revision,
+            source,
+            revision=(
+                None
+                if saved_model_dir or source != self.config.model_name
+                else self.config.model_revision
+            ),
             trust_remote_code=self.config.trust_remote_code,
             use_fast=True,
             src_lang=LANGUAGES[self.config.direction][0],
             tgt_lang=LANGUAGES[self.config.direction][1],
+            local_files_only=offline_mode(),
         )
         return configure_tokenizer(tokenizer, self.config.direction)
 
@@ -56,11 +108,15 @@ class VinAIModelFactory:
                 "transformers is required; install requirements-training.txt"
             ) from error
 
+        source = self.base_model_source()
         model = AutoModelForSeq2SeqLM.from_pretrained(
-            self.config.model_name,
-            revision=self.config.model_revision,
+            source,
+            revision=(
+                None if source != self.config.model_name else self.config.model_revision
+            ),
             trust_remote_code=self.config.trust_remote_code,
             low_cpu_mem_usage=True,
+            local_files_only=offline_mode(),
         )
         configure_model(model, self.load_tokenizer(), self.config.direction)
         generation = self.config.generation
@@ -107,7 +163,19 @@ class VinAIModelFactory:
             target_modules=settings.target_modules,
             bias=settings.bias,
         )
-        return get_peft_model(model, peft_config)
+        # Keep adapters portable: record the canonical Hub identity even when
+        # the base weights were loaded from a Kaggle Input directory.
+        peft_config.base_model_name_or_path = self.config.model_name
+        peft_config.revision = self.config.model_revision
+        peft_model = get_peft_model(model, peft_config)
+        # Recent PEFT releases overwrite the supplied identity with the
+        # model's local `_name_or_path` while wrapping it. Restore the pinned
+        # identity on the live config so save_pretrained writes a portable
+        # adapter_config.json and offline reload validation remains strict.
+        for adapter_config in peft_model.peft_config.values():
+            adapter_config.base_model_name_or_path = self.config.model_name
+            adapter_config.revision = self.config.model_revision
+        return peft_model
 
     @staticmethod
     def parameter_report(model: Any) -> ParameterReport:

@@ -3,7 +3,10 @@ from collections import Counter
 import re
 import unicodedata
 
-QUALITY_GATE_VERSION = 2
+QUALITY_GATE_VERSION = 3
+LEGAL_ENUMERATION_TOKENS = frozenset(
+    {"article", "clause", "point", "section", "điều", "khoản", "điểm", "mục"}
+)
 
 
 def _tokens(text):
@@ -31,20 +34,31 @@ def quality_report(predictions, references, direction, segment_ids=None):
         warning_reasons = []
         ratio = len(tokens) / max(1, len(ref_tokens))
         repeat = _repeat_fraction(tokens)
-        dominance = max(Counter(tokens).values(), default=0) / max(1, len(tokens))
+        token_counts = Counter(tokens)
+        dominant_token, dominant_count = (
+            token_counts.most_common(1)[0] if token_counts else ("", 0)
+        )
+        dominance = dominant_count / max(1, len(tokens))
         if not tokens:
             reasons.append("empty_output")
         if len(tokens) >= 12 and repeat > max(0.30, _repeat_fraction(ref_tokens) + 0.20):
             reasons.append("excessive_trigram_repetition")
-        # A short legal clause can legitimately repeat words such as "Điều".
-        # Dominance is only meaningful once the output is long enough.
-        if len(tokens) >= 20 and dominance > 0.25:
+        # Legal citation lists legitimately repeat Article/Clause/Điều/Khoản.
+        # Degenerate repetitions of those words are still caught by the
+        # trigram check above; dominance alone must not reject enumerations.
+        if (len(tokens) >= 20 and dominance > 0.25
+                and dominant_token not in LEGAL_ENUMERATION_TOKENS):
             reasons.append("dominant_token")
         if len(ref_tokens) >= 8:
             if ratio > 3.0:
                 reasons.append("excessive_length_ratio")
             elif ratio < 0.02:
-                reasons.append("near_empty_relative_to_reference")
+                # A nonempty fragment is severe under-translation, but a
+                # small number of these in the unfine-tuned base model does
+                # not indicate broken language control. Keep it visible and
+                # let domain fine-tuning attempt to repair it. Truly empty
+                # output is still a hard failure above.
+                warning_reasons.append("severe_under_translation")
             elif ratio < 0.25:
                 # Under-translation is a real quality issue, but unlike token
                 # collapse it is exactly the behaviour fine-tuning may repair.

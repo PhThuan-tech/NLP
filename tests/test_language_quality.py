@@ -26,7 +26,7 @@ class LanguageQualityTests(unittest.TestCase):
     def test_resume_rejects_legacy_run_without_language_marker(self):
         from src.vinai_baseline.config import ExperimentConfig
         from src.vinai_baseline.runner import BaselineRunner
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
         with tempfile.TemporaryDirectory() as tmp:
             config.output_dir = tmp
             checkpoint = Path(tmp) / "checkpoints/checkpoint-10"
@@ -70,6 +70,15 @@ class LanguageQualityTests(unittest.TestCase):
         self.assertEqual(report["warning_records"], 1)
         self.assertEqual(report["warnings"][0]["reasons"], ["under_translation"])
 
+    def test_nonempty_severe_under_translation_warns_but_empty_still_fails(self):
+        reference = "nội dung " * 120
+        short = quality_report(["Một mục."], [reference], "en2vi")
+        empty = quality_report([""], [reference], "en2vi")
+        self.assertEqual(short["status"], "passed")
+        self.assertEqual(short["warnings"][0]["reasons"], ["severe_under_translation"])
+        self.assertEqual(empty["status"], "failed")
+        self.assertIn("empty_output", empty["failures"][0]["reasons"])
+
     def test_short_legal_clause_is_not_a_dominance_false_positive(self):
         text = "2. Bãi bỏ Điều 15 và Điều 22. Điều 18. Điều khoản thi hành"
         report = quality_report([text], [text], "en2vi")
@@ -81,6 +90,18 @@ class LanguageQualityTests(unittest.TestCase):
         self.assertEqual(quality_report([text, "Xin chào"], [text, "Xin chào"], "en2vi")["status"], "passed")
         english = "The Ministry of Construction regulates housing development in this province."
         self.assertEqual(quality_report([english], [english], "vi2en")["status"], "passed")
+
+    def test_long_legal_article_enumeration_is_not_token_collapse(self):
+        text = "; ".join(f"Điều {number}" for number in range(1, 31))
+        report = quality_report([text], [text], "en2vi")
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["failed_records"], 0)
+
+    def test_nonlegal_dominant_token_still_fails(self):
+        text = " ".join(f"spam item{number}" for number in range(30))
+        report = quality_report([text], [text], "vi2en")
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("dominant_token", report["failures"][0]["reasons"])
 
     def test_gate_rejects_adapter_failed_and_stale_reports(self):
         with tempfile.TemporaryDirectory() as tmp:

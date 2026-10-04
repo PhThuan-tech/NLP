@@ -33,8 +33,8 @@ def create_configs(
     output_dir: Path,
     learning_rate: float = 5e-5,
     checkpoint_samples: int = 256,
-    length_penalty: float = 0.8,
-    repetition_penalty: float = 1.1,
+    length_penalty: float = 1.0,
+    repetition_penalty: float = 1.0,
     max_new_tokens: int = 448,
     overwrite: bool = False,
 ) -> dict[str, Any]:
@@ -70,7 +70,7 @@ def create_configs(
     if output_dir.exists() and any(output_dir.iterdir()) and not overwrite:
         raise FileExistsError(f"Config output is not empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    template_dir = project_root / "configs/vinai"
+    template_dir = project_root / "configs/templates"
     created = []
     for name in CONFIG_NAMES:
         template = json.loads((template_dir / name).read_text(encoding="utf-8"))
@@ -144,8 +144,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--learning-rate", type=float, default=5e-5)
     parser.add_argument("--checkpoint-samples", type=int, default=256)
-    parser.add_argument("--length-penalty", type=float, default=0.8)
-    parser.add_argument("--repetition-penalty", type=float, default=1.1)
+    parser.add_argument("--length-penalty", type=float, default=1.0)
+    parser.add_argument("--repetition-penalty", type=float, default=1.0)
     parser.add_argument("--max-new-tokens", type=int, default=448)
     parser.add_argument("--overwrite", action="store_true")
     return parser

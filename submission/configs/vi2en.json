@@ -1,0 +1,51 @@
+{
+  "run_name": "vlsp2026_vi2en_submission",
+  "direction": "vi2en",
+  "model_name": "vinai/vinai-translate-vi2en-v2",
+  "model_revision": "4eb2219d447d4352861e71e371a6b6abcb0509c8",
+  "output_dir": "outputs/submission/vi2en",
+  "seed": 67,
+  "data": {
+    "dataset_id": "",
+    "manifest_file": "",
+    "train_file": "placeholder_train_vi2en.jsonl",
+    "validation_file": "placeholder_dev_vi2en.jsonl",
+    "max_source_length": 512,
+    "max_target_length": 512,
+    "overlength_policy": "error",
+    "audit_batch_size": 128
+  },
+  "generation": {
+    "num_beams": 4,
+    "max_length": 512,
+    "max_new_tokens": null,
+    "length_penalty": 1.1,
+    "repetition_penalty": 1.0,
+    "no_repeat_ngram_size": 3,
+    "early_stopping": true,
+    "renormalize_logits": true
+  },
+  "training": {
+    "mode": "lora",
+    "epochs": 2.0,
+    "learning_rate": 0.0001,
+    "per_device_train_batch_size": 4,
+    "per_device_eval_batch_size": 8,
+    "gradient_accumulation_steps": 4,
+    "gradient_checkpointing": false,
+    "fp16": true,
+    "bf16": false,
+    "tf32": false,
+    "eval_strategy": "no",
+    "save_strategy": "no",
+    "early_stopping_patience": 0,
+    "require_cuda": true
+  },
+  "lora": {
+    "rank": 16,
+    "alpha": 32,
+    "dropout": 0.05,
+    "target_modules": ["q_proj", "v_proj"],
+    "bias": "none"
+  }
+}

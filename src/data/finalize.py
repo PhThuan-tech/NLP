@@ -89,7 +89,7 @@ VIETNAMESE_MARKERS = {
 
 @dataclass(frozen=True)
 class FinalizationConfig:
-    dataset_id: str = "legal_envi_clean_seed67_v2"
+    dataset_id: str = "legal_envi_clean_semantic_seed67_v3"
     split_seed: int = 67
     minimum_alignment_score: float = 0.75
     minimum_semantic_similarity: float | None = None
@@ -607,7 +607,9 @@ def finalize_dataset(
         ),
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "sentence_transformers_version": (
-            package_version("sentence-transformers")
+            parent_manifest_payload.get("sentence_transformers_version")
+            if config.reuse_semantic_scores
+            else package_version("sentence-transformers")
             if config.semantic_model is not None
             else None
         ),
@@ -635,7 +637,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--dataset-id", default="legal_envi_clean_seed67_v2")
+    parser.add_argument(
+        "--dataset-id", default="legal_envi_clean_semantic_seed67_v3"
+    )
     parser.add_argument("--split-seed", type=int, default=67)
     parser.add_argument("--minimum-alignment-score", type=float, default=0.75)
     parser.add_argument("--semantic-model")
@@ -644,6 +648,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--semantic-batch-size", type=int, default=64)
     parser.add_argument("--reuse-semantic-scores", action="store_true")
     parser.add_argument("--device")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print a compact completion summary instead of the full manifest",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
@@ -680,7 +689,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoder=encoder,
         overwrite=args.overwrite,
     )
-    print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    if args.quiet:
+        print(
+            json.dumps(
+                {
+                    "dataset_id": manifest["dataset_id"],
+                    "semantic_audit_only": manifest["semantic_audit_only"],
+                    "counts": manifest["counts"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
 
 

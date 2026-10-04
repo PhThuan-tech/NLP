@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from .config import ExperimentConfig
-from .modeling import VinAIModelFactory
+from .modeling import VinAIModelFactory, offline_mode
 
 
 BLANK_LINES_RE = re.compile(r"(\n[\t ]*\n+)")
@@ -193,6 +193,7 @@ def load_inference_model(
                 saved,
                 trust_remote_code=config.trust_remote_code,
                 low_cpu_mem_usage=True,
+                local_files_only=offline_mode(),
             )
         else:
             raise FileNotFoundError(
@@ -206,6 +207,7 @@ def load_inference_model(
             saved,
             trust_remote_code=config.trust_remote_code,
             low_cpu_mem_usage=True,
+            local_files_only=offline_mode(),
         )
     from .language import configure_model
     configure_model(model, tokenizer, config.direction)

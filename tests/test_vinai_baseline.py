@@ -13,7 +13,7 @@ import numpy as np
 
 from src.vinai_baseline.config import ExperimentConfig
 from src.vinai_baseline.compare_runs import comparable_rows
-from src.vinai_baseline.create_configs import create_configs
+from src.vinai_baseline.create_configs import CONFIG_NAMES, create_configs
 from src.vinai_baseline.data import (
     DynamicSeq2SeqCollator,
     JsonlCorpus,
@@ -87,7 +87,7 @@ class ConfigTests(unittest.TestCase):
             output = Path(directory) / "configs"
             report = create_configs(
                 project_root=Path.cwd(),
-                dataset_dir=Path("artifacts/processed_clean_seed67_v2"),
+                dataset_dir=Path("artifacts/processed_clean_semantic_seed67_v3"),
                 output_dir=output,
             )
             generated = ExperimentConfig.from_json(output / "en2vi_lora.json")
@@ -98,13 +98,15 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(generated.data.overlength_policy, "error")
 
     def test_all_repository_configs_are_valid(self):
-        for path in Path("configs/vinai").glob("*.json"):
+        for name in CONFIG_NAMES:
+            path = Path("configs/generated_v3") / name
             with self.subTest(path=path):
                 ExperimentConfig.from_json(path)
 
     def test_repository_configs_reference_current_dataset(self):
-        expected_root = Path("artifacts/processed_clean_seed67_v2")
-        for path in Path("configs/vinai").glob("*.json"):
+        expected_root = Path("artifacts/processed_clean_semantic_seed67_v3")
+        for name in CONFIG_NAMES:
+            path = Path("configs/generated_v3") / name
             with self.subTest(path=path):
                 config = ExperimentConfig.from_json(path)
                 data_files = [Path(config.data.validation_file)]
@@ -114,11 +116,11 @@ class ConfigTests(unittest.TestCase):
                     self.assertEqual(data_file.parent, expected_root)
                     self.assertTrue(data_file.is_file(), data_file)
                 self.assertEqual(config.seed, 67)
-                self.assertEqual(config.data.dataset_id, "legal_envi_clean_seed67_v2")
+                self.assertEqual(config.data.dataset_id, "legal_envi_clean_semantic_seed67_v3")
                 if config.training.mode != "none":
                     self.assertEqual(config.training.eval_strategy, "epoch")
                     self.assertEqual(config.training.save_strategy, "epoch")
-                    self.assertEqual(config.training.checkpoint_eval_samples, 128)
+                    self.assertEqual(config.training.checkpoint_eval_samples, 256)
                     self.assertEqual(config.training.per_device_eval_batch_size, 16)
                 if config.training.mode == "lora":
                     self.assertEqual(config.training.per_device_train_batch_size, 4)
@@ -127,11 +129,11 @@ class ConfigTests(unittest.TestCase):
     def test_frozen_dataset_contract_matches_both_directions(self):
         for name in ("en2vi_lora.json", "vi2en_lora.json"):
             with self.subTest(name=name):
-                config = ExperimentConfig.from_json(Path("configs/vinai") / name)
+                config = ExperimentConfig.from_json(Path("configs/generated_v3") / name)
                 BaselineRunner(config)._validate_dataset_contract()
 
     def test_public_test_cannot_be_training_data(self):
-        raw = json.loads(Path("configs/vinai/en2vi_lora.json").read_text("utf-8"))
+        raw = json.loads(Path("configs/generated_v3/en2vi_lora.json").read_text("utf-8"))
         raw["data"]["train_file"] = "segments_public_test_en2vi.jsonl"
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bad.json"
@@ -140,7 +142,7 @@ class ConfigTests(unittest.TestCase):
                 ExperimentConfig.from_json(path)
 
     def test_sample_limits_must_be_positive(self):
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
         with self.assertRaisesRegex(ValueError, "max_train_samples"):
             config.apply_overrides(max_train_samples=0)
 
@@ -170,8 +172,8 @@ class CorpusTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Duplicate segment_id"):
                 JsonlCorpus(path, direction="en2vi").load()
 
-    def test_frozen_v2_has_no_identity_duplicate_or_train_dev_text_leakage(self):
-        root = Path("artifacts/processed_clean_seed67_v2")
+    def test_frozen_v3_has_no_identity_duplicate_or_train_dev_text_leakage(self):
+        root = Path("artifacts/processed_clean_semantic_seed67_v3")
 
         def identities(path: Path):
             pairs = set()
@@ -351,7 +353,7 @@ class ComparisonTests(unittest.TestCase):
 
 class OutputSafetyTests(unittest.TestCase):
     def test_checkpoint_subset_is_category_proportional_and_document_capped(self):
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
         config.training.checkpoint_eval_samples = 20
         config.training.checkpoint_max_per_document = 6
         records = []
@@ -376,7 +378,7 @@ class OutputSafetyTests(unittest.TestCase):
         self.assertEqual(len(report["segment_ids"]), 20)
 
     def test_checkpoint_validation_subset_is_fixed_by_seed(self):
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
         records = [
             record(f"segment-{index:04d}", f"source {index}", f"target {index}")
             for index in range(200)
@@ -388,7 +390,7 @@ class OutputSafetyTests(unittest.TestCase):
         second_dataset, second_report = BaselineRunner(
             config
         )._checkpoint_validation_dataset(validation)
-        self.assertEqual(len(first_dataset), 128)
+        self.assertEqual(len(first_dataset), 200)
         self.assertEqual(first_report, second_report)
         self.assertEqual(
             [item.segment_id for item in first_dataset.records],
@@ -403,19 +405,19 @@ class OutputSafetyTests(unittest.TestCase):
         self.assertIn("CompactProgressCallback", runner_source)
 
     def test_epoch_strategy_has_three_validation_runs(self):
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
-        plan = BaselineRunner._training_plan(config, 18_316, 1_877)
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
+        plan = BaselineRunner._training_plan(config, 27_756, 2_783)
         self.assertEqual(plan["effective_batch_size_one_gpu"], 16)
-        self.assertEqual(plan["planned_optimizer_updates"], 3_435)
+        self.assertEqual(plan["planned_optimizer_updates"], 5_205)
         self.assertEqual(plan["evaluation_runs_during_training"], 3)
-        self.assertEqual(plan["checkpoint_validation_records"], 128)
+        self.assertEqual(plan["checkpoint_validation_records"], 256)
         self.assertEqual(
-            plan["planned_generated_validation_records_during_training"], 384
+            plan["planned_generated_validation_records_during_training"], 768
         )
-        self.assertEqual(plan["planned_final_validation_records"], 1_877)
+        self.assertEqual(plan["planned_final_validation_records"], 2_783)
 
     def test_completed_output_requires_a_new_run_id(self):
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
         with tempfile.TemporaryDirectory() as directory:
             config.output_dir = directory
             write_json(Path(directory) / "run_manifest.json", {"complete": True})
@@ -423,7 +425,7 @@ class OutputSafetyTests(unittest.TestCase):
                 BaselineRunner(config)._validate_output_state(do_train=True)
 
     def test_last_checkpoint_is_resolved_and_verified(self):
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
         with tempfile.TemporaryDirectory() as directory:
             config.output_dir = directory
             config.training.resume_from_checkpoint = None
@@ -440,7 +442,7 @@ class OutputSafetyTests(unittest.TestCase):
             )
 
     def test_audit_cannot_rewrite_config_of_interrupted_run(self):
-        config = ExperimentConfig.from_json("configs/vinai/en2vi_lora.json")
+        config = ExperimentConfig.from_json("configs/generated_v3/en2vi_lora.json")
         with tempfile.TemporaryDirectory() as directory:
             config.output_dir = directory
             runner = BaselineRunner(config)
@@ -503,16 +505,22 @@ class KaggleNotebookTests(unittest.TestCase):
     @staticmethod
     def _make_minimal_project(root: Path) -> None:
         (root / "src/vinai_baseline").mkdir(parents=True)
-        (root / "configs/vinai").mkdir(parents=True)
+        (root / "configs/generated_v3").mkdir(parents=True)
+        (root / "artifacts/processed_clean_semantic_seed67_v3").mkdir(parents=True)
         (root / "requirements-training.txt").write_text("", encoding="utf-8")
         (root / "src/vinai_baseline/cli.py").write_text("", encoding="utf-8")
-        (root / "configs/vinai/dummy.json").write_text("{}", encoding="utf-8")
+        (root / "configs/generated_v3/dummy.json").write_text("{}", encoding="utf-8")
+        (root / "artifacts/processed_clean_semantic_seed67_v3/manifest.json").write_text("{}", encoding="utf-8")
 
     def _execute_input_cell(self, input_root: Path, working_root: Path) -> dict:
         source = self._input_cell().replace(
             'Path("/kaggle/input")', f'Path(r"{input_root}")'
         ).replace(
+            "Path('/kaggle/input')", f'Path(r"{input_root}")'
+        ).replace(
             'dir="/kaggle/working"', f'dir=r"{working_root}"'
+        ).replace(
+            "dir='/kaggle/working'", f'dir=r"{working_root}"'
         )
         namespace = {"os": os}
         original = Path.cwd()
@@ -532,11 +540,12 @@ class KaggleNotebookTests(unittest.TestCase):
             if cell.get("cell_type") == "code"
         )
         self.assertIn("direct_candidates", code)
-        self.assertIn("zip_candidates", code)
-        self.assertIn("RUN_V3_SEMANTIC_AUDIT", code)
-        self.assertIn("--reuse-semantic-scores", code)
-        self.assertIn('DATASET_PROFILE = "v2"', code)
-        self.assertIn('"v2": "legal_envi_clean_seed67_v2"', code)
+        self.assertIn("project_zips", code)
+        self.assertIn("OFFLINE_TRAINING = True", code)
+        self.assertIn("VINAI_EN2VI_MODEL_DIR", code)
+        self.assertNotIn("RUN_V3_SEMANTIC_AUDIT", code)
+        self.assertIn('DATASET_PROFILE = "v3_frozen"', code)
+        self.assertIn('default_config_dir = PROJECT_DIR / "configs/generated_v3"', code)
         self.assertIn('get("seed") != 67', code)
         self.assertIn('get("semantic_audit_only")', code)
         self.assertIn('Path(OUTPUT_DIR) / "logs"', code)
@@ -555,7 +564,7 @@ class KaggleNotebookTests(unittest.TestCase):
             working.mkdir()
             result = self._execute_input_cell(root / "input", working)
             project = Path(result["PROJECT_DIR"])
-            self.assertEqual(result["input_mode"], "Kaggle Dataset đã giải nén")
+            self.assertEqual(result["input_mode"], "extracted Kaggle project")
             self.assertTrue((project / "src/vinai_baseline/cli.py").is_file())
 
     def test_kaggle_input_cell_accepts_zip_dataset(self):
@@ -566,7 +575,7 @@ class KaggleNotebookTests(unittest.TestCase):
             self._make_minimal_project(source)
             input_root = root / "input"
             input_root.mkdir()
-            with zipfile.ZipFile(input_root / "NLP_v3_parent.zip", "w") as archive:
+            with zipfile.ZipFile(input_root / "NLP_v3_frozen.zip", "w") as archive:
                 for path in source.rglob("*"):
                     if path.is_file():
                         archive.write(path, path.relative_to(source).as_posix())

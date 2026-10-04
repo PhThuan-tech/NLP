@@ -1,0 +1,25 @@
+.git
+.gitignore
+.venv
+.test-deps
+__pycache__
+*.py[cod]
+*.ipynb
+*.log
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+artifacts
+checkpoints
+data
+docs
+notebooks
+outputs
+results_model_sweep_testset
+tests
+wandb
+
+# The submission image only needs source code, configs, and the two merged
+# offline models under submission/models.

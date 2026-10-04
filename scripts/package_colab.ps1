@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputPath = "NLP_colab.zip",
-    [string]$DatasetPath = "artifacts\processed_clean_seed67_v2"
+    [string]$DatasetPath = "artifacts\processed_clean_semantic_seed67_v3",
+    [string]$ResultZipPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,8 +27,10 @@ $required = @(
     "tests",
     "docs",
     "scripts",
-    "notebooks\02_vinai_colab.ipynb",
+    "submission",
+    "data\instruction.md",
     "notebooks\03_vinai_kaggle.ipynb",
+    "notebooks\04_v3_builder_kaggle.ipynb",
     $datasetRelative
 )
 
@@ -42,6 +45,19 @@ try {
         $destinationParent = Split-Path -Parent $destination
         New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
         Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+    }
+
+    if ($ResultZipPath) {
+        $resultZip = (Resolve-Path -LiteralPath (Join-Path $projectRoot $ResultZipPath)).Path
+        if (-not (Test-Path -LiteralPath $resultZip -PathType Leaf)) {
+            throw "ResultZipPath is not a file: $resultZip"
+        }
+        if ([IO.Path]::GetExtension($resultZip) -ne ".zip") {
+            throw "ResultZipPath must be a ZIP file: $resultZip"
+        }
+        $attachedRuns = Join-Path $stage "attached_runs"
+        New-Item -ItemType Directory -Path $attachedRuns -Force | Out-Null
+        Copy-Item -LiteralPath $resultZip -Destination (Join-Path $attachedRuns ([IO.Path]::GetFileName($resultZip))) -Force
     }
 
     # Tests/imports may have recreated bytecode since the last cleanup. Never

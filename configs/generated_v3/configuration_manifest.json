@@ -1,0 +1,20 @@
+{
+  "dataset_id": "legal_envi_clean_semantic_seed67_v3",
+  "split_seed": 67,
+  "dataset_manifest": "artifacts/processed_clean_semantic_seed67_v3/manifest.json",
+  "learning_rate_lora": 5e-05,
+  "checkpoint_samples": 256,
+  "generation": {
+    "length_penalty": 1.0,
+    "repetition_penalty": 1.0,
+    "max_new_tokens": 448
+  },
+  "created": [
+    "configs\\generated_v3\\en2vi_zero_shot.json",
+    "configs\\generated_v3\\en2vi_lora.json",
+    "configs\\generated_v3\\en2vi_full.json",
+    "configs\\generated_v3\\vi2en_zero_shot.json",
+    "configs\\generated_v3\\vi2en_lora.json",
+    "configs\\generated_v3\\vi2en_full.json"
+  ]
+}
