@@ -114,6 +114,8 @@ class TranslationRuntime:
         self._config: ExperimentConfig | None = None
         self._tokenizer: Any = None
         self._model: Any = None
+        self._pipeline: Any = None
+        self._pipeline_input_hash: str | None = None
         self.lock = threading.Lock()
         if self.batch_size < 1:
             raise ValueError("VINAI_BATCH_SIZE must be positive")
@@ -141,6 +143,7 @@ class TranslationRuntime:
         import torch
 
         if self._model is not None:
+            self._pipeline = None
             del self._model
             self._model = None
             self._tokenizer = None
@@ -179,23 +182,73 @@ class TranslationRuntime:
             import torch
 
             assert self._config is not None
-            chunks = split_markdown_document(
-                text,
-                self._tokenizer,
-                maximum_tokens=self.maximum_source_tokens,
-            )
+            def legacy(source):
+                chunks = split_markdown_document(
+                    source, self._tokenizer, maximum_tokens=self.maximum_source_tokens,
+                )
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                predictions, report = translate_chunks(
+                    chunks, tokenizer=self._tokenizer, model=self._model,
+                    config=self._config, batch_size=self.batch_size, device=device,
+                )
+                output = assemble_document(chunks, predictions)
+                report["markdown_structure"] = markdown_structure_report(source, output)
+                return output, report
+            pipeline_path = os.environ.get("VINAI_PIPELINE_CONFIG", "")
+            if pipeline_path:
+                try:
+                    return self._optional_pipeline(text, direction, pipeline_path, legacy)
+                except Exception as error:
+                    # Configuration/glossary/promotion failures belong to the new layer.
+                    # Preserve the original HTTP translation contract.
+                    try:
+                        output, report = legacy(text)
+                    except Exception as legacy_error:
+                        output, report = text, {"chunks": 0, "source_kept": True, "legacy_failure": type(legacy_error).__name__}
+                    if not output.strip(): output = text; report["source_kept"] = True
+                    report.update(fallback=True, fallback_reason=type(error).__name__)
+                    print(json.dumps({"event": "pipeline_setup_fallback", "reason": type(error).__name__}), flush=True)
+                    from .pipeline.report import write_report
+                    import hashlib
+                    try:
+                        report_dir = Path(os.environ.get("VINAI_PIPELINE_REPORT_DIR", str(Path(pipeline_path).parent.parent / "reports")))
+                        write_report(report_dir / (hashlib.sha256(text.encode()).hexdigest()+f"_{time.time_ns()}.report.json"), report)
+                    except OSError:
+                        print(json.dumps({"event": "report_write_failed", "direction": direction}), flush=True)
+                    return output, report
+            return legacy(text)
+
+    def _optional_pipeline(self, text, direction, path, legacy):
+        import torch
+        import hashlib
+        from .pipeline.config import PipelineConfig
+        from .pipeline.translator import ModelTranslator
+        from .pipeline.runtime import LegalTranslationPipeline
+        from .pipeline.report import write_report
+        from .pipeline.promotion import verify_promotion, model_identity
+        pipeline_config = PipelineConfig.load(path)
+        if not pipeline_config.values["features"]["enabled"] or direction not in pipeline_config.values["directions"]:
+            return legacy(text)
+        glossary_path = pipeline_config.resource(pipeline_config.values["glossary"]["file"])
+        # A reviewed CSV can change independently of the single config.
+        input_hash = pipeline_config.hash + hashlib.sha256(glossary_path.read_bytes()).hexdigest()
+        if self._pipeline is None or self._pipeline_input_hash != input_hash:
+            if not pipeline_config.values["evaluation"]["experimental"]:
+                verify_promotion(pipeline_config, self._config, self.settings[direction].model_dir)
+            pipeline_config.values["translator"]["model_identity"] = model_identity(self._config, self.settings[direction].model_dir)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            predictions, report = translate_chunks(
-                chunks,
-                tokenizer=self._tokenizer,
-                model=self._model,
-                config=self._config,
-                batch_size=self.batch_size,
-                device=device,
-            )
-            output = assemble_document(chunks, predictions)
-            report["markdown_structure"] = markdown_structure_report(text, output)
-            return output, report
+            self._pipeline = LegalTranslationPipeline(ModelTranslator(
+                self._tokenizer, self._model, self._config, pipeline_config, device,
+            ), pipeline_config)
+            self._pipeline_input_hash = input_hash
+        output, report = self._pipeline.translate(text, direction=direction, legacy=legacy)
+        report_dir = Path(os.environ["VINAI_PIPELINE_REPORT_DIR"]) if "VINAI_PIPELINE_REPORT_DIR" in os.environ else pipeline_config.resource(pipeline_config.values["runtime"]["reports_directory"])
+        name = hashlib.sha256(text.encode()).hexdigest() + f"_{time.time_ns()}.report.json"
+        try:
+            write_report(report_dir / name, report)
+        except OSError:
+            print(json.dumps({"event": "report_write_failed", "direction": direction}), flush=True)
+        return output, report
 
 
 class SubmissionHandler(BaseHTTPRequestHandler):

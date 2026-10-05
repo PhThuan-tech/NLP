@@ -88,7 +88,8 @@
     "retry_reserve_seconds": null,
     "structured_logs": true,
     "reports_directory": "../reports",
-    "safe_fallback": true
+    "safe_fallback": true,
+    "cublas_workspace_config": ":4096:8"
   },
   "evaluation": {
     "experimental": false,
@@ -106,7 +107,8 @@
     ],
     "manual_review_records": 30,
     "allowed_chrf_drop": 0.0,
-    "required_structure_rate": 100.0
+    "required_structure_rate": 100.0,
+    "progress_records": 25
   },
   "promotion": {
     "approved": false,
@@ -154,5 +156,9 @@
     "tokenizer_sha256": "cdbd2277deee13a943b702c0131ea9034d00c2288f332ee0c5fea520b07ea936",
     "stored_length_matches": 27756,
     "calibration_method": "local fast tokenizer encode_batch with special tokens; p95 target, half retry, p99 target/source linear slope and residual margin"
+  },
+  "legacy": {
+    "maximum_source_tokens": 448,
+    "batch_size": 8
   }
 }

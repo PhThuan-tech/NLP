@@ -12,6 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VINAI_MAXIMUM_SOURCE_TOKENS=448 \
     VINAI_EN2VI_CONFIG=/app/configs/en2vi.json \
     VINAI_VI2EN_CONFIG=/app/configs/vi2en.json \
+    VINAI_PIPELINE_CONFIG=/app/configs/inference_pipeline.json \
     VINAI_EN2VI_MODEL_DIR=/models/en2vi \
     VINAI_VI2EN_MODEL_DIR=/models/vi2en
 
@@ -23,6 +24,7 @@ RUN python -m pip install --no-cache-dir -r /tmp/requirements-inference.txt \
 
 COPY src /app/src
 COPY submission/configs /app/configs
+COPY submission/resources /app/resources
 COPY submission/models /models
 
 RUN useradd --create-home --uid 10001 appuser \

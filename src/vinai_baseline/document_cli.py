@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--merge-lora", action="store_true")
     parser.add_argument("--allow-cpu", action="store_true")
+    parser.add_argument("--pipeline-config", type=Path, help="Optional single inference-layer JSON; legacy path remains default")
     return parser
 
 
@@ -48,7 +49,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         saved_model_dir=args.saved_model_dir,
         merge_lora=args.merge_lora,
     )
-    source = args.input.read_text(encoding="utf-8")
+    source = args.input.read_bytes().decode("utf-8")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.pipeline_config:
+        from .pipeline.config import PipelineConfig
+        from .pipeline.runtime import LegalTranslationPipeline
+        from .pipeline.translator import ModelTranslator
+        from .pipeline.report import write_report
+        settings = PipelineConfig.load(args.pipeline_config)
+        if settings.values["features"]["enabled"] and config.direction in settings.values["directions"]:
+            if not settings.values["evaluation"]["experimental"]:
+                from .pipeline.promotion import verify_promotion
+                verify_promotion(settings, config, args.saved_model_dir)
+            if device.type == "cuda" and config.training.fp16:
+                model.to(device=device, dtype=torch.float16)
+            from .pipeline.promotion import model_identity
+            settings.values["translator"]["model_identity"] = model_identity(config, args.saved_model_dir)
+            def legacy(text):
+                chunks = split_markdown_document(text, tokenizer, maximum_tokens=args.maximum_source_tokens)
+                predictions, legacy_report = translate_chunks(chunks, tokenizer=tokenizer, model=model, config=config, batch_size=args.batch_size, device=device)
+                return assemble_document(chunks, predictions), legacy_report
+            output, report = LegalTranslationPipeline(ModelTranslator(tokenizer, model, config, settings, device), settings).translate(source, direction=config.direction, legacy=legacy)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_bytes(output.encode("utf-8"))
+            write_report(args.report or args.output.with_suffix(args.output.suffix + ".report.json"), report)
+            print(json.dumps({"output": str(args.output), "summary": report.get("summary"), "fallback": report.get("fallback", False)}))
+            return 0
     chunks = split_markdown_document(
         source,
         tokenizer,

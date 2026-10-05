@@ -25,10 +25,12 @@ def main():
                 distributions[display.capitalize()].update(variants); counts[display.capitalize()]+=1; examples.setdefault(display.capitalize(),row["segment_id"])
         # Multiline legal headers provide stronger organization boundaries than free text.
         for phrase in re.findall(r"(?m)^\s*((?:BỘ|Bộ|ỦY BAN NHÂN DÂN|Ủy ban nhân dân|TÒA ÁN|Tòa án|SỞ|Sở) [^\n,;:.]+)",source):
-            phrase=phrase.strip()
+            phrase=re.split(r"(?i)\s+CỘNG\s+H[OÒ]A\b|\s+[-–]{2,}",phrase)[0].strip(" -–")
             english=re.findall(r"(?im)^\s*((?:MINISTRY|Ministry|PEOPLE['’]S COMMITTEE|People['’]s Committee|COURT|Court|DEPARTMENT|Department)[^\n;:]+)",target)
             if len(english)==1:
-                distributions[phrase][english[0].strip()]+=1; counts[phrase]+=1; examples.setdefault(phrase,row["segment_id"])
+                translated=re.split(r"(?i)\s+(?:THE\s+)?SOCIALIST REPUBLIC\b|\s+[-–]{2,}|\s+Independence\b",english[0])[0].strip(" -–")
+                if len(phrase.split())>1 and not translated.upper().endswith((" OF"," THE","MINISTRY")):
+                    distributions[phrase][translated]+=1; counts[phrase]+=1; examples.setdefault(phrase,row["segment_id"])
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with args.output.open("w",encoding="utf-8",newline="") as handle:
         writer=csv.DictWriter(handle,fieldnames=FIELDS); writer.writeheader()
