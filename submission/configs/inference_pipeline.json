@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "seed": 67,
+  "directions": [
+    "vi2en"
+  ],
+  "features": {
+    "enabled": false,
+    "parser": true,
+    "inline_placeholders": true,
+    "chunker": true,
+    "new_decoding": false,
+    "dynamic_length": false,
+    "glossary": true,
+    "retry": true,
+    "validator": true,
+    "cache": true,
+    "reverse_check": false
+  },
+  "parser": {
+    "placeholder_format": "brackets",
+    "placeholder_format_selected": false
+  },
+  "chunker": {
+    "target_budget": 264,
+    "hard_budget": 1024,
+    "retry_budget": 132,
+    "short_cell_tokens": 4,
+    "short_cell_strategy": "isolated",
+    "short_cell_lookup": {},
+    "context_separator": " : "
+  },
+  "translator": {
+    "batch_size": 8,
+    "minimum_new_tokens": 8,
+    "maximum_new_tokens": 1023,
+    "dynamic_slope": 1.2978418717224696,
+    "dynamic_margin": 55,
+    "candidate_decoding": {
+      "no_repeat_ngram_size": 0
+    },
+    "model_identity": null
+  },
+  "validator": {
+    "weights": {
+      "error": 3,
+      "warning": 1,
+      "info": 0
+    },
+    "short_ratio": 0.5422303183906225,
+    "short_ratio_by_kind": {
+      "point": 0.46073124406457744,
+      "clause": 0.4395238095238095,
+      "list_item": 0.5010665818490246,
+      "title": 0.45243396226415095,
+      "article_heading": 0.45454545454545453,
+      "preamble": 0.5061156235069278
+    },
+    "vi_density_limit": 0.0013394956052987655,
+    "kept_names": [],
+    "dangling_pattern": "(?:/ND|\\bof the|\\band|People[’'])\\s*$",
+    "sentence_retention_ratio": 0.46153846153846156,
+    "consecutive_ngram_sizes": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "consecutive_repeat_min": 3
+  },
+  "glossary": {
+    "file": "../resources/glossary.csv",
+    "domains": {},
+    "domain_min_score": null,
+    "domain_margin": null
+  },
+  "retry": {
+    "rounds": 1,
+    "minimum_warnings": 2,
+    "nbest": 4,
+    "constrained": false,
+    "constrained_max_terms": 1,
+    "anti_repeat": {},
+    "require_error_fixed": true
+  },
+  "runtime": {
+    "time_budget_per_doc": null,
+    "retry_reserve_seconds": null,
+    "structured_logs": true,
+    "reports_directory": "../reports",
+    "safe_fallback": true
+  },
+  "evaluation": {
+    "experimental": false,
+    "random_clean_records": 30,
+    "cause_probe_minimum": 10,
+    "placeholder_samples": 200,
+    "placeholder_formats": [
+      "tags",
+      "brackets",
+      "braces"
+    ],
+    "length_penalties": [
+      1.0,
+      1.2
+    ],
+    "manual_review_records": 30,
+    "allowed_chrf_drop": 0.0,
+    "required_structure_rate": 100.0
+  },
+  "promotion": {
+    "approved": false,
+    "evidence": null
+  },
+  "calibration": {
+    "records": 27756,
+    "source_percentiles": {
+      "0.5": 211.0,
+      "0.9": 254.0,
+      "0.95": 264.0,
+      "0.99": 297.4500000000007
+    },
+    "token_ratio_p99": 1.2978418717224696,
+    "target_minus_source_p99": 55,
+    "word_ratio_p01": 0.5422303183906225,
+    "english_vi_density_p99": 0.0013394956052987655,
+    "by_kind_word_ratio_p01": {
+      "point": {
+        "records": 484,
+        "threshold": 0.46073124406457744
+      },
+      "clause": {
+        "records": 570,
+        "threshold": 0.4395238095238095
+      },
+      "list_item": {
+        "records": 44,
+        "threshold": 0.5010665818490246
+      },
+      "title": {
+        "records": 587,
+        "threshold": 0.45243396226415095
+      },
+      "article_heading": {
+        "records": 261,
+        "threshold": 0.45454545454545453
+      },
+      "preamble": {
+        "records": 11,
+        "threshold": 0.5061156235069278
+      }
+    },
+    "train_sha256": "24119e6b9043252ab39eae9b749400983d2fad54802ed951562434c14443d95d",
+    "tokenizer_sha256": "cdbd2277deee13a943b702c0131ea9034d00c2288f332ee0c5fea520b07ea936",
+    "stored_length_matches": 27756,
+    "calibration_method": "local fast tokenizer encode_batch with special tokens; p95 target, half retry, p99 target/source linear slope and residual margin"
+  }
+}
