@@ -32,11 +32,31 @@ def identity(config):
 def require_zero_shot_gate(config, report_path):
     import json
     report = json.loads(Path(report_path).read_text(encoding="utf-8"))
-    if (report.get("kind") != "zero_shot" or report.get("identity") != identity(config)
-            or report.get("requested_samples") != 256
-            or report.get("quality", {}).get("evaluated_records") != 256
-            or report.get("quality", {}).get("status") != "passed"):
-        raise ValueError("A passing zero-shot 256 gate with matching data/model/decoding/code is required")
+    expected_identity = identity(config)
+    mismatches = []
+    if report.get("kind") != "zero_shot":
+        mismatches.append(f"kind={report.get('kind')!r}")
+    actual_identity = report.get("identity")
+    if actual_identity != expected_identity:
+        actual_identity = actual_identity if isinstance(actual_identity, dict) else {}
+        fields = sorted(
+            key
+            for key in set(actual_identity) | set(expected_identity)
+            if actual_identity.get(key) != expected_identity.get(key)
+        )
+        mismatches.append("identity fields=" + ",".join(fields))
+    if report.get("requested_samples") != 256:
+        mismatches.append(f"requested_samples={report.get('requested_samples')!r}")
+    quality = report.get("quality", {})
+    if quality.get("evaluated_records") != 256:
+        mismatches.append(f"evaluated_records={quality.get('evaluated_records')!r}")
+    if quality.get("status") != "passed":
+        mismatches.append(f"quality.status={quality.get('status')!r}")
+    if mismatches:
+        raise ValueError(
+            "A passing zero-shot 256 gate with matching data/model/decoding/code "
+            "is required. Mismatch: " + "; ".join(mismatches)
+        )
     return report
 
 
