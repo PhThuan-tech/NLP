@@ -131,15 +131,17 @@ def parse_document(source: str, *, doc_id: str | None = None, placeholder_format
         document.units.append(TranslationUnit(f"{doc_id}:{n:05d}",doc_id,n,kind,prefix,raw,masked,start,end,placeholders,context or {}))
     for line_no, line in enumerate(lines):
         body=line.rstrip("\r\n"); stripped=body.strip(); block_kind="text"
-        if line_no==0 and stripped.lstrip("\ufeff")=="---": front=True; block_kind="front_matter"
+        fence_body=re.sub(r"^(?:[ \t]*> ?)+","",body)
+        fence_body=re.sub(r"^[ \t]*(?:\d+[.)]|[A-Za-zđĐ][)]|[-+*]) +","",fence_body)
+        if line_no==0 and stripped.lstrip("\ufeff")=="---" and any(l.strip() in ("---","...") for l in lines[1:]): front=True; block_kind="front_matter"
         elif front:
             block_kind="front_matter"
             if stripped in ("---","..."): front=False
         elif fence:
             block_kind="code"
-            if re.match(r"^\s*"+re.escape(fence[0])+"{"+str(fence[1])+r",}\s*$",body): fence=None
-        elif re.match(r"^\s{0,3}(`{3,}|~{3,})",body):
-            marker=re.match(r"^\s{0,3}(`{3,}|~{3,})",body)[1]; fence=(marker[0],len(marker)); block_kind="code"
+            if re.match(r"^\s*"+re.escape(fence[0])+"{"+str(fence[1])+r",}\s*$",fence_body): fence=None
+        elif re.match(r"^\s{0,3}(`{3,}|~{3,})",fence_body):
+            marker=re.match(r"^\s{0,3}(`{3,}|~{3,})",fence_body)[1]; fence=(marker[0],len(marker)); block_kind="code"
         elif html:
             block_kind="html"
             if html=="blank" and not stripped: html=None

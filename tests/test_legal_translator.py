@@ -31,9 +31,13 @@ class GenerationProvenanceTests(unittest.TestCase):
         cached=translator.generate("short",overrides={"max_new_tokens":8},stage="retry")
         self.assertTrue(cached[0].provenance["cache_hit"])
         self.assertEqual(cached[0].stage,"retry")
+        official=translator.generate("source")
+        self.assertFalse(official[0].reached_token_cap)
+        self.assertEqual(official[0].max_new_tokens,511)
     def test_new_decoding_requires_evidence_or_experimental_mode(self):
         config=PipelineConfig.load("submission/configs/inference_pipeline.json",environment=False)
         config.values["features"]["new_decoding"]=True
+        config.values["features"]["enabled"]=True
         with self.assertRaisesRegex(ValueError,"promotion"): config.validate()
 
 

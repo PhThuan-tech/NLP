@@ -102,3 +102,12 @@ Trang hiện tại chưa công bố schema HTTP cuối, endpoint, port, GPU/runt
 timeout, giới hạn dung lượng và việc nhận image archive hay build context. Kiểm
 tra lại trang challenge và email ban tổ chức; nếu protocol thay đổi chỉ cần sửa
 service/wrapper và build lại image, không cần train lại.
+
+## 6. Pipeline inference pháp lý tùy chọn
+
+`configs/inference_pipeline.json` được đưa vào Docker nhưng đang tắt. Hướng dẫn
+đánh giá offline và chốt bằng chứng nằm ở
+[`docs/legal_inference_pipeline.md`](../docs/legal_inference_pipeline.md).
+Giữ mặc định này khi chưa có full-dev R0–R5, review, bằng chứng placeholder và
+GPU/runtime deployment. Adapter và merged weights có identity riêng; cần đo
+đúng bộ weights sẽ deploy. API và Bash wrapper vẫn giữ giao diện hiện tại.

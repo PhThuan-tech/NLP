@@ -1,0 +1,24 @@
+{
+  "method": "Document-frequency bigrams, frequent-feature lift against category prior; thresholds are train percentiles, not a supervised translation-model update",
+  "train_sha256": "24119e6b9043252ab39eae9b749400983d2fad54802ed951562434c14443d95d",
+  "records": 27756,
+  "parameters": {
+    "ngram_size": 2,
+    "frequency_quantile": 0.95,
+    "lift_quantile": 0.9,
+    "confidence_quantile": 0.1
+  },
+  "keywords_per_domain": {
+    "Bat_dong_san": 210,
+    "Dich_vu_phap_ly": 141,
+    "Quyen_dan_su": 265,
+    "So_huu_tri_tue": 210,
+    "Thu_tuc_to_tung": 184,
+    "Trach_nhiem_hinh_su": 223,
+    "Vi_pham_hanh_chinh": 384
+  },
+  "train_top1_rate": 73.20219051736561,
+  "train_top1_note": "Calibration fit statistic, not held-out classification accuracy",
+  "minimum_score": 2.0236161911098214,
+  "margin": 1.972344993972269
+}

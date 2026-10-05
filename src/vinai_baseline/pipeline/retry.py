@@ -5,6 +5,7 @@ from .chunker import split_unit
 from .md_parser import restore_inline, strip_spans
 from .types import Candidate
 from .validator import penalty, validate
+from .reassembler import escape_generated
 
 
 def error_keys(candidate): return {c["check"] for c in candidate.checks if c["severity"]=="error"}
@@ -33,8 +34,11 @@ def retry_unit(unit,translator,config,*,direction):
         for candidate in translator.generate(text,stage="retry",strategy="strip_spans"):
             check(candidate,singles)
             if not any(c["check"]=="placeholder" for c in candidate.checks):
-                candidate.text=opening+restore_inline(candidate.text,singles)+closing; candidate.restored=True
+                candidate.text=opening+restore_inline(escape_generated(candidate.text,singles),singles)+closing; candidate.restored=True
                 if partial: candidate.checks.append({"check":"markup_lost","severity":"warning","detail":"Partial inline spans cannot be safely aligned"})
+                for p in unit.placeholders:
+                    if p.role=="close" and p.original.startswith("]") and p.original not in candidate.text:
+                        candidate.checks.append({"check":"protected_inline_loss","severity":"error","detail":"A link/image destination cannot be restored without guessing alignment"})
     elif checks & {"token_cutoff","short","missing_sentences","dangling","empty","numbers","dates","identifiers","references","wrong_language"}:
         pieces=split_unit(unit.src_masked,translator.tokenizer,budget=settings["chunker"]["retry_budget"],hard_budget=settings["chunker"]["hard_budget"],phrases=[h["src_phrase"] for h in unit.glossary_hits],placeholders=unit.placeholders)
         translated=translator.generate_many([p.text for p in pieces],stage="retry",strategy="split_smaller")

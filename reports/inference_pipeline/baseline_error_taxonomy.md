@@ -1,6 +1,7 @@
 # Baseline error taxonomy
 
-Status: saved full-dev snapshot; current service R0 rerun and EOS cause probe pending.
+Status: saved full-dev snapshot; full current-service R0 rerun remains pending.
+An actual-model ten-case EOS/ngram probe is recorded in `cutoff_cause_probe.md`.
 
 Records: 2783; BLEU: 33.728281; chrF++: 60.295810.
 Dev SHA256: `a701f808ae84ab202bf89bd5d336bcddd02a43655a7c3637254d525258aa781b`
@@ -18,7 +19,9 @@ Adapter SHA256: `bca5c144efc084137379c0fb8774c9aea3c741781c687b0d972cfd9f756e398
 
 E7 is unmeasured (no approved glossary), not zero confirmed errors.
 E2 counts missing structural markers, not confirmed missing meaning. E6 checks identifiers only at M0.
-EOS/cap cannot be inferred from saved text. No conclusion that ngram3 causes truncation.
+EOS/cap cannot be inferred from this saved text. The separate paired probe
+recorded EOS before cap on ten selected `/ND` cases and sensitivity to ngram3.
+It does not establish a cause for all short outputs or a full-dev improvement.
 
 ## Metric signatures
 - BLEU: `nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0`

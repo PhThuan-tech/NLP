@@ -32,8 +32,11 @@ class PipelineConfig:
         if v["runtime"]["time_budget_per_doc"] is not None and v["runtime"]["time_budget_per_doc"]<=0: raise ValueError("Time budget must be positive or null")
         if v["translator"]["batch_size"]<1: raise ValueError("Batch size must be positive")
         if v["retry"]["rounds"]!=1: raise ValueError("Only one retry round is allowed")
+        if v["features"]["reverse_check"]: raise ValueError("Reverse checking is optional and not implemented in this version")
+        if v["retry"]["nbest"]<1 or v["retry"]["minimum_warnings"]<1: raise ValueError("Retry candidate/warning counts must be positive")
+        if v["chunker"]["short_cell_strategy"] not in {"isolated","lookup","column_context"}: raise ValueError("Unknown short-cell strategy")
         if v["translator"]["candidate_decoding"].get("do_sample",False): raise ValueError("Sampling is forbidden")
-        if v["features"]["new_decoding"] and not v["evaluation"]["experimental"] and not v["promotion"].get("approved",False):
+        if v["features"]["enabled"] and v["features"]["new_decoding"] and not v["evaluation"]["experimental"] and not v["promotion"].get("approved",False):
             raise ValueError("New decoding requires promotion evidence or explicit experimental mode")
 
     @property

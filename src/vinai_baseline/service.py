@@ -242,6 +242,7 @@ class TranslationRuntime:
             ), pipeline_config)
             self._pipeline_input_hash = input_hash
         output, report = self._pipeline.translate(text, direction=direction, legacy=legacy)
+        report["environment"] = {"device": "cuda" if torch.cuda.is_available() else "cpu", "gpu": torch.cuda.get_device_name() if torch.cuda.is_available() else None}
         report_dir = Path(os.environ["VINAI_PIPELINE_REPORT_DIR"]) if "VINAI_PIPELINE_REPORT_DIR" in os.environ else pipeline_config.resource(pipeline_config.values["runtime"]["reports_directory"])
         name = hashlib.sha256(text.encode()).hexdigest() + f"_{time.time_ns()}.report.json"
         try:

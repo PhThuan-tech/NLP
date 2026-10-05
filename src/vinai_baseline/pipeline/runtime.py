@@ -1,13 +1,13 @@
 """Optional inference orchestration with source coverage and legacy fallback."""
 from __future__ import annotations
-from dataclasses import replace
+from dataclasses import asdict, replace
 import re
 import time
 from ..inference import token_length, markdown_structure_report
 from .chunker import split_unit
 from .glossary import Glossary
 from .md_parser import parse_document, placeholder_errors, restore_inline
-from .reassembler import reassemble, coverage
+from .reassembler import reassemble, coverage, escape_generated
 from .report import build_report, log_stage, code_version
 from .retry import retry_unit, should_retry
 from .types import Candidate
@@ -30,14 +30,19 @@ class LegalTranslationPipeline:
         try:
             since=time.perf_counter(); document=parse_document(source,doc_id=doc_id,placeholder_format=settings["parser"]["placeholder_format"],inline=flags["inline_placeholders"])
             count=len(document.units); record("parse",since)
-            since=time.perf_counter(); domain,scores=self.glossary.domain(source)
+            since=time.perf_counter(); domain,scores=self.glossary.domain(source) if flags["glossary"] else ("general",{})
             for unit in document.units:
                 unit.domain=domain; unit.context["domain_scores"]=scores
                 if flags["glossary"]: unit.glossary_hits=self.glossary.match(unit.src_text,direction=direction,domain=domain)
             record("glossary",since)
-            since=time.perf_counter(); piece_map=[]; inputs=[]; short_cells={}
+            since=time.perf_counter(); piece_map=[]; inputs=[]; short_cells={}; protected_only=set()
             for unit in document.units:
                 unit.src_tokens=token_length(self.translator.tokenizer,unit.src_masked)
+                remaining=unit.src_masked
+                for placeholder in unit.placeholders: remaining=remaining.replace(placeholder.token,"")
+                if unit.placeholders and not any(c.isalnum() for c in remaining):
+                    protected_only.add(unit.unit_id)
+                    piece_map.append((unit,[],[])); continue
                 if flags["chunker"]:
                     pieces=split_unit(unit.src_masked,self.translator.tokenizer,budget=settings["chunker"]["target_budget"],hard_budget=settings["chunker"]["hard_budget"],phrases=[h["src_phrase"] for h in unit.glossary_hits],placeholders=unit.placeholders)
                 else:
@@ -69,6 +74,9 @@ class LegalTranslationPipeline:
             record("first_generation",since)
             since=time.perf_counter()
             for unit,pieces,indices in piece_map:
+                if unit.unit_id in protected_only:
+                    candidate=Candidate(unit.src_masked,strategy="protected_only",provenance={"generation_skipped":"No translatable text outside protected spans"})
+                    unit.translations=[candidate]; unit.final=candidate; continue
                 values=[generated[i][0] for i in indices]
                 candidate=Candidate("".join(p.separator_before+c.text for p,c in zip(pieces,values,strict=True)),gen_finished_by_eos=all(c.gen_finished_by_eos is True for c in values),reached_token_cap=any(c.reached_token_cap is True for c in values),generated_tokens=sum(c.generated_tokens or 0 for c in values),provenance={"pieces":[{"generation":c.provenance,"eos":c.gen_finished_by_eos,"cap":c.reached_token_cap,"generated_tokens":c.generated_tokens} for c in values]})
                 unit.translations=[candidate]; unit.final=candidate
@@ -79,7 +87,7 @@ class LegalTranslationPipeline:
             reserve=settings["runtime"]["retry_reserve_seconds"]
             if reserve is None: reserve=stages["first_generation"]/max(count,1)*settings["retry"]["nbest"]
             for unit in document.units:
-                if not flags["retry"] or not should_retry(unit.final,settings["retry"]): continue
+                if unit.unit_id in protected_only or not flags["retry"] or not should_retry(unit.final,settings["retry"]): continue
                 if budget is not None and time.perf_counter()-started+reserve>=budget:
                     retry_skipped=True; unit.final.provenance["retry_skipped_budget"]=True; continue
                 try: retry_unit(unit,self.translator,self.config,direction=direction)
@@ -97,13 +105,14 @@ class LegalTranslationPipeline:
                     text=unit.final.text
                     if "\n" in text or "\r" in text:
                         text=re.sub(r"[\r\n]+"," ",text); unit.final.checks.append({"check":"newlines_normalized","severity":"warning","detail":"Generated line breaks retained as spaces inside one source slot"})
-                    if unit.kind=="table_cell": text=re.sub(r"(?<!\\)\|",r"\|",text)
-                    unit.final.text=text
+                    unit.final.text=escape_generated(text,unit.placeholders)
             output=reassemble(document); invariants=coverage(document); structure=markdown_structure_report(source,output)
             invariants.update({"unit_coverage":invariants["source_units"]==invariants["final_units"],"partial_markup_lost_units":lost_markup,"legacy_marker_check":structure,"structure_preserved":not lost_markup and structure["structure_counts_match"]})
             record("reassemble",since); stages["total"]=time.perf_counter()-started
             if budget is not None and stages["total"]>budget: raise TimeoutError("Document pipeline exceeded configured stage-boundary budget")
             report=build_report(document,self.config,self.glossary.version,stages,invariants,retry_skipped=retry_skipped)
+            if hasattr(self.translator,"experiment"):
+                report["generation"]=asdict(self.translator.experiment.generation)
             organizations={}
             for unit in document.units:
                 for hit in unit.glossary_hits:

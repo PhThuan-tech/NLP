@@ -1,6 +1,19 @@
 from __future__ import annotations
 from .md_parser import restore_inline
 from .types import ParsedDocument
+import re
+
+
+def escape_generated(text, placeholders):
+    """Render generated syntax as literal text; original syntax comes from slots."""
+    tokens=[p.token for p in placeholders]
+    pieces=re.split("("+"|".join(re.escape(t) for t in tokens)+")",text) if tokens else [text]
+    safe=[]
+    for part in pieces:
+        if part in tokens: safe.append(part); continue
+        safe.append(re.sub(r"([\\`*_~\[\]<>#|])",r"\\\1",part))
+    result="".join(safe)
+    return re.sub(r"^([ \t]*)(?:(\d+)([.)])|([-+]))(?=\s)",lambda m:m[1]+((m[2]+"\\"+m[3]) if m[2] else "\\"+m[4]),result)
 
 
 def reassemble(document: ParsedDocument, *, identity: bool=False) -> str:

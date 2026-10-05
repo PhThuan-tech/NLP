@@ -17,7 +17,7 @@ if (-not $datasetAbsolute.StartsWith($projectPrefix, [StringComparison]::Ordinal
 $datasetRelative = $datasetAbsolute.Substring($projectPrefix.Length)
 
 $required = @(
-    "README",
+    "README.md",
     "requirements.txt",
     "requirements-training.txt",
     "requirements-training-colab.txt",
@@ -31,6 +31,7 @@ $required = @(
     "data\instruction.md",
     "notebooks\03_vinai_kaggle.ipynb",
     "notebooks\04_v3_builder_kaggle.ipynb",
+    "notebooks\05_inference_pipeline_kaggle.ipynb",
     $datasetRelative
 )
 

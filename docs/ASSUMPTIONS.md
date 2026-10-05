@@ -7,7 +7,7 @@ dataset, adapter, training configuration, or official decoding file is modified.
 
 | # | Finding and evidence |
 |---|---|
-| 1 | `src/vinai_baseline/config.py:22` selects VinAI Translate v2 for each direction. `offline_training_assets/models/vinai-translate-vi2en-v2/config.json:44` declares 1,024 position embeddings. Language token handling is in `src/vinai_baseline/language.py:7`. |
+| 1 | `src/vinai_baseline/config.py:22` selects VinAI Translate v2 for each direction. `offline_training_assets/models/vinai-translate-vi2en-v2/config.json:40` declares 1,024 position embeddings. Language token handling is in `src/vinai_baseline/language.py:7`. |
 | 2 | `modelAI/*en2vi*094600380389Z_result.zip` and `modelAI/*vi2en*013129101193Z_result.zip` contain `best_model/adapter_model.safetensors`. Loading uses `src/vinai_baseline/inference.py:load_inference_model`, with base identity/revision validation. EN→VI reverse checks are possible but optional and disabled. |
 | 3 | `src/vinai_baseline/inference.py:translate_chunks` sorts by token length, runs deterministic generation, and reorders outputs. `submission/configs/vi2en.json` is the official configuration. Its beams=4, length penalty=1.1, ngram=3 differ from the saved training evaluation (beams=2, penalty=1.0, ngram=3). These baselines must not be mixed. |
 | 4 | `src/vinai_baseline/service.py:SubmissionHandler` accepts POST `/translate`, `/translate/en2vi`, `/translate/vi2en`, raw UTF-8 Markdown or the existing JSON body; returns raw UTF-8 Markdown. `submission/translate.sh` keeps its three arguments. No route or payload changes. |
@@ -22,8 +22,11 @@ dataset, adapter, training configuration, or official decoding file is modified.
 
 - Saved validation outputs are a **snapshot baseline**, not a fresh rerun of the
   current document service. They have no generated token IDs. EOS and cap causes
-  cannot be recovered from those strings. M0 cause probes and a fresh R0 run are
-  provided for Kaggle; no cause is asserted before those measurements.
+  cannot be recovered from those strings. A fresh CPU paired probe on ten selected
+  `/ND` cases recorded EOS before the cap for all ten baseline outputs. Changing
+  only ngram3 to zero removed the measured cutoff signals on this subset. See
+  `reports/inference_pipeline/cutoff_cause_probe.md`; this is not a full-dev result.
+  A fresh service R0 and the other ablations are provided for Kaggle.
 - The suggested ngram=0 configuration is a candidate, not an official change.
   New decoding has a separate feature flag and needs matching A/B evidence.
 - Retry selection follows the strict rule in section 9.5: lower penalty, no new
@@ -48,8 +51,10 @@ dataset, adapter, training configuration, or official decoding file is modified.
 
 ## Acceptance gates
 
-Local tests and dev round-trip checks can be completed on CPU. Actual placeholder
-survival, EOS cause probes, decoding A/B, R0–R5 model evaluations, Docker GPU smoke,
-and declared time-budget checks require execution on the deployment environment.
-Reports label these measurements `pending` until generated. The submission service
-keeps the legacy route by default. No model or metric result is fabricated.
+Local unit tests, full-dev parser round-trip, a ten-case cause probe, and small
+actual-model code-path smokes have been completed on CPU. Full-dev A/B and R0–R5,
+manual legal review, Docker GPU smoke and declared time-budget checks remain
+pending. Frozen dev contains no paired inline markup, so a 200-unit real-dev
+placeholder survival comparison cannot be reported from this artifact. Promotion
+requires that evidence when inline placeholders are enabled. The submission
+service keeps the legacy route by default. No model or metric result is fabricated.

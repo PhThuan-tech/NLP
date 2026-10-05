@@ -70,6 +70,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 predictions, legacy_report = translate_chunks(chunks, tokenizer=tokenizer, model=model, config=config, batch_size=args.batch_size, device=device)
                 return assemble_document(chunks, predictions), legacy_report
             output, report = LegalTranslationPipeline(ModelTranslator(tokenizer, model, config, settings, device), settings).translate(source, direction=config.direction, legacy=legacy)
+            report["environment"] = {"device": str(device), "gpu": torch.cuda.get_device_name() if device.type == "cuda" else None}
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_bytes(output.encode("utf-8"))
             write_report(args.report or args.output.with_suffix(args.output.suffix + ".report.json"), report)

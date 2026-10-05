@@ -1,6 +1,7 @@
 """Deterministic model adapter with per-sequence EOS/cap provenance."""
 from __future__ import annotations
 from collections import defaultdict
+from copy import deepcopy
 from dataclasses import asdict
 import hashlib
 import json
@@ -32,6 +33,7 @@ class ModelTranslator:
             t=settings["translator"]; cap=math.ceil(t["dynamic_slope"]*token_length(self.tokenizer,text)+t["dynamic_margin"])
             params["max_new_tokens"]=min(t["maximum_new_tokens"],max(t["minimum_new_tokens"],cap))
         if params.get("max_new_tokens") is not None: params.pop("max_length",None)
+        else: params.pop("max_new_tokens",None)
         params.update(do_sample=False,return_dict_in_generate=True)
         return params
 
@@ -55,7 +57,10 @@ class ModelTranslator:
                 batch=items[start:start+batch_size]; started=time.perf_counter()
                 inputs=self.tokenizer([t for _,t,_ in batch],return_tensors="pt",padding=True,truncation=False)
                 if inputs["input_ids"].shape[-1]>self.pipeline.values["chunker"]["hard_budget"]: raise ValueError("Model input exceeds hard budget; truncation forbidden")
-                with torch.inference_mode(): result=self.model.generate(**{k:v.to(self.device) for k,v in inputs.items()},**params)
+                effective=deepcopy(self.model.generation_config)
+                if "max_new_tokens" in params: effective.max_length=None
+                for name,value in params.items(): setattr(effective,name,value)
+                with torch.inference_mode(): result=self.model.generate(**{k:v.to(self.device) for k,v in inputs.items()},generation_config=effective)
                 sequences=result.sequences.detach().cpu().tolist(); decoded=self.tokenizer.batch_decode(sequences,skip_special_tokens=True)
                 eos=self.model.generation_config.eos_token_id; eos=set(eos if isinstance(eos,list) else [eos]); pad=self.tokenizer.pad_token_id
                 for row,(index,text,key) in enumerate(batch):

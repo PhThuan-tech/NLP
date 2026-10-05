@@ -1,6 +1,8 @@
 # Decoding A/B
 
-Status: pending real generation. No official generation configuration changed.
+Status: pending full paired-dev generation. A one-record actual-model CPU smoke
+has exercised all six candidates; it is not configuration-selection evidence.
+No official generation configuration changed.
 
 | Candidate | Changes relative to experiment | Status |
 |---|---|---|

@@ -54,6 +54,12 @@ def entities(text,language):
     return {"dates":date_values,"identifiers":Counter(ascii_legal(re.sub(r"\s+","",m[0])).replace("–","-").upper() for m in ID_RE.finditer(rest)),"references":Counter(KINDS[m[1].lower().rstrip('.')]+":"+ascii_legal(m[2].lower()) for m in REF_RE.finditer(rest)),"numbers":Counter(normalize_number(m[0],language) for m in NUM_RE.finditer(rest))}
 
 
+def numeric_spelling(text):
+    _,spans=dates(text); masked=list(text)
+    for a,b in spans: masked[a:b]=" "*(b-a)
+    return Counter(re.sub(r"[.,]","",m[0]) for m in NUM_RE.finditer("".join(masked)))
+
+
 def consecutive_runs(text,size):
     tokens=re.findall(r"\w+|[^\w\s]",text.casefold()); maximum=1
     for start in range(len(tokens)-size):
@@ -95,6 +101,7 @@ def validate(unit,candidate,settings,*,direction="vi2en",placeholders=None):
             if name=="numbers" and direction=="vi2en" and not extra:
                 written=all(n in NUMBER_WORDS and len(re.findall(r"(?i)\b"+NUMBER_WORDS[n]+r"\b",plain))>=count for n,count in missing.items())
                 if written or all(n.startswith("ambiguous:") for n in missing): severity="warning"
+            if name=="numbers" and numeric_spelling(unit.src_text)==numeric_spelling(plain): severity="warning"
             add(name,severity,{"missing":{str(k):v for k,v in missing.items()},"extra":{str(k):v for k,v in extra.items()},"written_number_equivalence":written})
     for hit in unit.glossary_hits:
         variants=[hit["preferred"],*hit["accepted_variants"]]
@@ -119,4 +126,4 @@ def citation_variants(text):
     return {key:sorted(values) for key,values in variants.items() if len(values)>1}
 
 
-TAXONOMY={"empty":"E1","wrong_language":"E1","short":"E2","missing_sentences":"E2","dangling":"E3","token_cutoff":"E3","repetition":"E4","placeholder":"E5","markup_lost":"E5","dates":"E6","numbers":"E6","identifiers":"E6","references":"E6","terminology":"E7"}
+TAXONOMY={"empty":"E1","wrong_language":"E1","source_kept":"E1","short":"E2","missing_sentences":"E2","dangling":"E3","token_cutoff":"E3","repetition":"E4","placeholder":"E5","protected_inline_loss":"E5","markup_lost":"E5","dates":"E6","numbers":"E6","identifiers":"E6","references":"E6","terminology":"E7"}

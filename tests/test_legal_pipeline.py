@@ -32,6 +32,7 @@ class PipelineTests(unittest.TestCase):
         config=self.config(); config.values["features"]["retry"]=False
         output,report=LegalTranslationPipeline(self.translator(""),config).translate("- Nội dung\n",direction="vi2en")
         self.assertEqual(output,"- Nội dung\n"); self.assertEqual(report["summary"]["SOURCE_KEPT"],1)
+        self.assertEqual(report["units"][0]["final"]["penalty"],config.values["validator"]["weights"]["error"])
     def test_new_layer_failure_falls_back_without_empty_output(self):
         output,report=LegalTranslationPipeline(self.translator(raise_error=True),self.config()).translate("Nguồn",direction="vi2en",legacy=lambda text:("Baseline",{"chunks":1}))
         self.assertEqual(output,"Baseline"); self.assertTrue(report["fallback"])
@@ -39,6 +40,16 @@ class PipelineTests(unittest.TestCase):
         config=self.config(); config.values["runtime"]["time_budget_per_doc"]=1e-12
         output,report=LegalTranslationPipeline(self.translator(""),config).translate("Nguồn",direction="vi2en",legacy=lambda text:(text,{"chunks":1}))
         self.assertTrue(report["fallback"]); self.assertEqual(report["fallback_reason"],"TimeoutError")
+    def test_protected_only_unit_does_not_call_model(self):
+        config=self.config()
+        output,report=LegalTranslationPipeline(self.translator(raise_error=True),config).translate("`immutable_code`\r\n",direction="vi2en")
+        self.assertEqual(output,"`immutable_code`\r\n"); self.assertEqual(report["summary"]["SOURCE_KEPT"],0)
+    def test_generated_markdown_cannot_create_new_structure(self):
+        config=self.config(); config.values["features"]["retry"]=False
+        for translated in ("# invented heading", "- invented bullet", "1. invented list"):
+            output,report=LegalTranslationPipeline(self.translator(translated),config).translate("Original text",direction="vi2en")
+            self.assertTrue(report["invariants"]["structure_preserved"])
+            self.assertIn("\\",output)
 
 
 if __name__=="__main__": unittest.main()

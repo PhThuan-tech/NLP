@@ -5,8 +5,9 @@ Baseline dịch tài liệu pháp luật hai chiều **English → Vietnamese** 
 LoRA, đánh giá theo document/segment và triển khai dưới dạng Docker chạy offline.
 
 > Trạng thái: dataset v3, hai LoRA run và decoding sweep đã hoàn thành. Repo đã
-> có pipeline inference/submission; cần tải hai thư mục `best_model` từ Kaggle để
-> merge và build Docker image cuối.
+> có hai ZIP model đã train trong `modelAI/`; bước merge và kiểm thử Docker cuối
+> vẫn cần thực hiện. Pipeline inference pháp lý mới đã có code và notebook offline,
+> đang tắt trong submission để chờ full-dev ablation và nghiệm thu.
 
 <a id="muc-luc"></a>
 ## Mục lục
@@ -23,6 +24,7 @@ LoRA, đánh giá theo document/segment và triển khai dưới dạng Docker c
 10. [Public test và private test](#test)
 11. [Đóng gói submission](#submission)
 12. [Kiểm thử repository](#kiem-thu)
+13. [Pipeline inference pháp lý, không train lại](#inference-phap-ly)
 
 <a id="gioi-thieu"></a>
 ## 1. Giới thiệu cuộc thi
@@ -490,11 +492,40 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 python -m unittest discover -s tests -v
 ```
 
-Trạng thái gần nhất: **77 tests passed, 1 optional cached-tokenizer integration
-test skipped**. Các test bao phủ data split/finalization, language control, config
+Trạng thái ngày 05/10/2026: **117 tests chạy, 116 passed, 1 optional cached-tokenizer
+integration test skipped**. Các test bao phủ data split/finalization, language control, config
 contract, quality gate, resume safety, document chunking, offline model resolution,
-submission service và merged-model validation.
+submission service, merged-model validation, parser giữ byte nguồn, validator,
+glossary đã duyệt, retry và điều kiện chốt pipeline.
 
 Trước khi nộp, luôn kiểm tra lại trang challenge và mailing list. Endpoint, port,
 GPU/RAM, timeout, giới hạn archive và protocol private test cuối vẫn có thể được
 ban tổ chức bổ sung.
+
+<a id="inference-phap-ly"></a>
+## 13. Pipeline inference pháp lý, không train lại
+
+Lớp mới dùng adapter VI→EN đã train: giữ cấu trúc Markdown và placeholder,
+chia đoạn theo thống kê train, kiểm số/ngày/viện dẫn, rồi dịch lại một vòng nếu
+có lỗi. Glossary chỉ dùng các dòng bạn duyệt; bảng ứng viên đang ở `pending`.
+
+**Hướng dẫn từng bước:** [docs/legal_inference_pipeline.md](docs/legal_inference_pipeline.md).
+Notebook riêng: [05_inference_pipeline_kaggle.ipynb](notebooks/05_inference_pipeline_kaggle.ipynb).
+
+```powershell
+.venv\Scripts\python.exe scripts\package_inference_pipeline.py
+```
+
+Script tạo `dist/NLP_inference_pipeline.zip` và SHA256 để upload Kaggle. Add Input
+thêm base VI→EN offline và wheelhouse đã dùng train. Notebook dùng frozen dev để
+chạy A/B và R0–R5, xuất report và 30 mẫu chờ bạn rà soát; không chạy training.
+
+Parser round-trip đạt 2.783/2.783 đoạn dev. Probe 10 mẫu cụt `/ND` cho thấy EOS
+xuất hiện trước cap; chỉ tắt ngram3 cải thiện chrF++ trên nhóm này từ 41,9001 lên
+72,9127. Đây là **nhóm mẫu lỗi được chọn**, chưa phải cải thiện toàn dev.
+Xem [bằng chứng cause probe](reports/inference_pipeline/cutoff_cause_probe.md).
+
+Pipeline đang tắt tại `submission/configs/inference_pipeline.json`. Full-dev
+R0–R5, review pháp lý, placeholder survival, Docker GPU và ngân sách thời gian
+còn chờ. Dev hiện không có markup dạng cặp để đo survival trên 200 units; giới
+hạn này được ghi trong report và chặn chốt pipeline khi chưa có bằng chứng.

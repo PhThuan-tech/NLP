@@ -31,6 +31,14 @@ class ParserTests(unittest.TestCase):
         self.assertTrue(partial); self.assertEqual(len(singles),1); self.assertEqual(restore_inline(plain,singles),"partial bold and `protected`")
     def test_missing_final_is_not_silent(self):
         with self.assertRaises(ValueError): reassemble(parse_document("Text"))
+    def test_unterminated_front_matter_is_a_rule_not_lost_text(self):
+        doc=parse_document("---\nTranslate this text\n")
+        self.assertEqual(len(doc.units),1)
+        self.assertEqual(doc.units[0].src_text,"Translate this text")
+    def test_fences_inside_quotes_and_lists_are_not_translatable(self):
+        for source in ("> ```py\n> # immutable\n> ```\n", "- ```py\n  # immutable\n  ```\n"):
+            doc=parse_document(source)
+            self.assertEqual(doc.units,[]); self.assertEqual(reassemble(doc),source)
 
 
 if __name__=="__main__": unittest.main()

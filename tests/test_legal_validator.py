@@ -42,6 +42,8 @@ class ValidatorTests(unittest.TestCase):
     def test_written_number_is_warning_and_citations_only_report(self):
         self.assertEqual(self.checks("Có 2 người.","There are two people.")["numbers"],"warning")
         self.assertEqual(citation_variants("Article 5; Art. 5"),{"article:5":["Art. 5","Article 5"]})
+    def test_ambiguous_locale_format_is_warning_not_confirmed_integer_error(self):
+        self.assertEqual(self.checks("Số tiền 1,000 đồng.","Amount 1,000 dong.")["numbers"],"warning")
 
 
 if __name__=="__main__": unittest.main()

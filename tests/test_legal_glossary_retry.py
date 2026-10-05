@@ -24,6 +24,12 @@ class GlossaryRetryTests(unittest.TestCase):
             hits=glossary.match("Bộ Y tế và Bộ Xây dựng, thuốc, y tếx",direction="vi2en",domain="general")
             self.assertEqual([h["id"] for h in hits],["full"])
             self.assertEqual(glossary.match("Bộ Y tế",direction="en2vi",domain="general"),[])
+    def test_ambiguous_domain_uses_general_and_confident_domain_matches(self):
+        settings={"domains":{"medical":{"sức khỏe":2},"land":{"đất đai":2}},"domain_min_score":2,"domain_margin":1}
+        glossary=Glossary(None,settings)
+        self.assertEqual(glossary.domain("sức khỏe đất đai")[0],"general")
+        self.assertEqual(glossary.domain("sức khỏe")[0],"medical")
+        self.assertEqual(glossary.domain("văn bản thông thường")[0],"general")
     def test_selection_tie_and_new_error_cannot_win(self):
         weights={"error":3,"warning":1,"info":0}
         first=Candidate("Bad.",checks=[{"check":"numbers","severity":"error"}])
@@ -45,6 +51,17 @@ class GlossaryRetryTests(unittest.TestCase):
         translator=Translator(); retry_unit(unit,translator,config,direction="vi2en")
         self.assertEqual(translator.calls,1); self.assertEqual(unit.status,"RETRIED_FIXED")
         self.assertEqual(len(unit.translations),2)
+        with self.assertRaisesRegex(ValueError,"second retry"): retry_unit(unit,translator,config,direction="vi2en")
+    def test_partial_link_destination_cannot_be_silently_dropped(self):
+        config=PipelineConfig.load("submission/configs/inference_pipeline.json",environment=False)
+        unit=parse_document("Follow [the rules](https://legal.example) here.").units[0]
+        unit.translations=[Candidate("Follow the rules here.",checks=[{"check":"placeholder","severity":"error"}])]
+        class Translator:
+            tokenizer=WordTokenizer()
+            def generate(self,text,**kwargs): return [Candidate("Follow the rules here.","retry","strip_spans",True,False)]
+        retry_unit(unit,Translator(),config,direction="vi2en")
+        self.assertIs(unit.final,unit.translations[0]); self.assertEqual(unit.status,"RETRIED_UNFIXED")
+        self.assertTrue(any(c["check"]=="protected_inline_loss" for c in unit.translations[1].checks))
 
 
 if __name__=="__main__": unittest.main()

@@ -1,0 +1,439 @@
+{
+  "status": "measured_selected_error_subset_only",
+  "records": 10,
+  "dev_sha256": "a701f808ae84ab202bf89bd5d336bcddd02a43655a7c3637254d525258aa781b",
+  "historical_code_sha256": "364ff8fc36cf35dc61bfb66ddd7fb9fade24d095ed646552532a5c3fe8e33baf",
+  "model_identity": {
+    "base": "vinai/vinai-translate-vi2en-v2",
+    "revision": "4eb2219d447d4352861e71e371a6b6abcb0509c8",
+    "weights": {
+      "adapter_model.safetensors": "bca5c144efc084137379c0fb8774c9aea3c741781c687b0d972cfd9f756e3986"
+    }
+  },
+  "baseline_generation": {
+    "do_sample": false,
+    "early_stopping": true,
+    "length_penalty": 1.0,
+    "max_new_tokens": 448,
+    "no_repeat_ngram_size": 3,
+    "num_beams": 2,
+    "renormalize_logits": true,
+    "repetition_penalty": 1.0,
+    "return_dict_in_generate": true
+  },
+  "only_change": {
+    "no_repeat_ngram_size": 0
+  },
+  "environment": {
+    "device": "cpu",
+    "torch": "2.14.1+cpu",
+    "transformers": "5.18.0",
+    "peft": "0.21.2"
+  },
+  "summaries": [
+    {
+      "name": "A0",
+      "records": 10,
+      "metrics": {
+        "BLEU": 21.067046292314895,
+        "chrF++": 41.90005411540728,
+        "signatures": {
+          "BLEU": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+          "chrF++": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0"
+        },
+        "sacrebleu_version": "2.6.0",
+        "documents": {
+          "Bat_dong_san/2": {
+            "BLEU": 4.319296850227609,
+            "chrF++": 28.227616580112613,
+            "segments": 2,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Bat_dong_san/81": {
+            "BLEU": 32.41787869256256,
+            "chrF++": 51.40536241997356,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Bat_dong_san/9": {
+            "BLEU": 38.67991468390186,
+            "chrF++": 65.17175838601763,
+            "segments": 3,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Dich_vu_phap_ly/64": {
+            "BLEU": 1.8432071687597842,
+            "chrF++": 24.977987927718456,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Quyen_dan_su/197": {
+            "BLEU": 26.49174246646791,
+            "chrF++": 48.253979974548,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Quyen_dan_su/284": {
+            "BLEU": 13.735818462111613,
+            "chrF++": 35.78271933771691,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Quyen_dan_su/54": {
+            "BLEU": 0.9767667382627733,
+            "chrF++": 15.36842268460733,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          }
+        }
+      },
+      "taxonomy_counts": {
+        "E1": 1,
+        "E2": 6,
+        "E3": 10,
+        "E4": 0,
+        "E5": 4,
+        "E6": 10,
+        "E7": 0
+      },
+      "taxonomy_rates": {
+        "E1": 10.0,
+        "E2": 60.0,
+        "E3": 100.0,
+        "E4": 0.0,
+        "E5": 40.0,
+        "E6": 100.0,
+        "E7": 0.0
+      },
+      "runtime_seconds": 178.3299438999984,
+      "seconds_per_unit": 17.83299438999984
+    },
+    {
+      "name": "A1",
+      "records": 10,
+      "metrics": {
+        "BLEU": 57.28953124617018,
+        "chrF++": 72.91273673707177,
+        "signatures": {
+          "BLEU": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+          "chrF++": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0"
+        },
+        "sacrebleu_version": "2.6.0",
+        "documents": {
+          "Bat_dong_san/2": {
+            "BLEU": 66.93186748996432,
+            "chrF++": 75.0582385922042,
+            "segments": 2,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Bat_dong_san/81": {
+            "BLEU": 75.27429551408657,
+            "chrF++": 86.72256489087107,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Bat_dong_san/9": {
+            "BLEU": 43.84607883574612,
+            "chrF++": 69.38386541446718,
+            "segments": 3,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Dich_vu_phap_ly/64": {
+            "BLEU": 73.19213368209738,
+            "chrF++": 87.1717997880108,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Quyen_dan_su/197": {
+            "BLEU": 36.23285232380474,
+            "chrF++": 61.533169759496985,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Quyen_dan_su/284": {
+            "BLEU": 77.60438814017688,
+            "chrF++": 89.9703662401105,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          },
+          "Quyen_dan_su/54": {
+            "BLEU": 46.61722126349239,
+            "chrF++": 66.98349601010933,
+            "segments": 1,
+            "layout": "synthetic double-newline, not original Markdown documents"
+          }
+        }
+      },
+      "taxonomy_counts": {
+        "E1": 1,
+        "E2": 0,
+        "E3": 0,
+        "E4": 0,
+        "E5": 4,
+        "E6": 1,
+        "E7": 0
+      },
+      "taxonomy_rates": {
+        "E1": 10.0,
+        "E2": 0.0,
+        "E3": 0.0,
+        "E4": 0.0,
+        "E5": 40.0,
+        "E6": 10.0,
+        "E7": 0.0
+      },
+      "runtime_seconds": 244.02883800000018,
+      "seconds_per_unit": 24.40288380000002
+    }
+  ],
+  "pairs": [
+    {
+      "segment_id": "Bat_dong_san/2::segment-0000::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 70,
+        "max_new_tokens": 448,
+        "ending": " DECREE AMENDING AND SUPPLEMENTING A NUMBER OF ARTICLES OF DECREE NO. 18/2020/ND",
+        "taxonomy": [
+          "E2",
+          "E3",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 395,
+        "max_new_tokens": 448,
+        "ending": "o. 84/2025/QH15; At the proposal of the Minister of Agriculture and Environment;",
+        "taxonomy": []
+      }
+    },
+    {
+      "segment_id": "Bat_dong_san/2::segment-0030::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 108,
+        "max_new_tokens": 448,
+        "ending": "ons in topography, cartography and geodesy amended by the Decreed No. 04/2022/ND",
+        "taxonomy": [
+          "E2",
+          "E3",
+          "E5",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 181,
+        "max_new_tokens": 448,
+        "ending": "all be applied. GOVERNMENT KT. PRIME MINISTER DEPUTY PRIME MINISTER Ho Quoc Dung",
+        "taxonomy": [
+          "E5"
+        ]
+      }
+    },
+    {
+      "segment_id": "Bat_dong_san/81::segment-0000::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 192,
+        "max_new_tokens": 448,
+        "ending": " CP DATED APRIL 01, 2021 ON AMENDMENTS TO THE AUTHORITY’S Decree No. 100 2015/ND",
+        "taxonomy": [
+          "E2",
+          "E3",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 290,
+        "max_new_tokens": 448,
+        "ending": " dated June 17, 2020; Pursuant to the Law on Urban Planning dated June 17, 2009;",
+        "taxonomy": []
+      }
+    },
+    {
+      "segment_id": "Bat_dong_san/9::segment-0024::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 182,
+        "max_new_tokens": 448,
+        "ending": "f Decree No. 103/2024/ND-CP (amended and supplemented in Decrees No. 291/2025/ND",
+        "taxonomy": [
+          "E3",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 185,
+        "max_new_tokens": 448,
+        "ending": "d in Decree No. 291/2025/ND-CP) of the Government on land use levy and land rent",
+        "taxonomy": []
+      }
+    },
+    {
+      "segment_id": "Bat_dong_san/9::segment-0041::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 236,
+        "max_new_tokens": 448,
+        "ending": "auses 18 and dd, Clauss 19 Article 1 of the Government’s Decrees No. 291/2025/ND",
+        "taxonomy": [
+          "E3",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 254,
+        "max_new_tokens": 448,
+        "ending": "clause 18, point dd of clause 19 of Article 1 of the Decree No. 291/2025/ND-CP).",
+        "taxonomy": [
+          "E6"
+        ]
+      }
+    },
+    {
+      "segment_id": "Bat_dong_san/9::segment-0067::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 259,
+        "max_new_tokens": 448,
+        "ending": "nded in point a clauses 2. Article 1 of the Government’s Decrees No. 291/2025/ND",
+        "taxonomy": [
+          "E1",
+          "E3",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 339,
+        "max_new_tokens": 448,
+        "ending": " services) in Point a Clause 1 Article 40 is removed. Article 14. Implementation",
+        "taxonomy": [
+          "E1"
+        ]
+      }
+    },
+    {
+      "segment_id": "Dich_vu_phap_ly/64::segment-0000::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 73,
+        "max_new_tokens": 448,
+        "ending": "ND SUPPLEMENTING A NUMBER OF ARTICLES OF THE  Government’s Decree No. 07/2007/ND",
+        "taxonomy": [
+          "E2",
+          "E3",
+          "E5",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 303,
+        "max_new_tokens": 448,
+        "ending": ", Article 2 is amended and supplemented with Clause 8 into Article 2 as follows:",
+        "taxonomy": [
+          "E5"
+        ]
+      }
+    },
+    {
+      "segment_id": "Quyen_dan_su/197::segment-0002::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 197,
+        "max_new_tokens": 448,
+        "ending": " as prescribed in Clause 1, Article 1 of the Government’s Decrees No. 33/2012/ND",
+        "taxonomy": [
+          "E3",
+          "E5",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 284,
+        "max_new_tokens": 448,
+        "ending": "f the association 1. Responsibility to report on the organization of congresses:",
+        "taxonomy": [
+          "E5"
+        ]
+      }
+    },
+    {
+      "segment_id": "Quyen_dan_su/284::segment-0000::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 70,
+        "max_new_tokens": 448,
+        "ending": "ND SUPPLEMENTING A NUMBER OF ARTICLES OF THE  Government’s Decree No. 68/2002/ND",
+        "taxonomy": [
+          "E2",
+          "E3",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 176,
+        "max_new_tokens": 448,
+        "ending": "aw on Marriage and Family; At the proposal of the Minister of Justice, DECREES :",
+        "taxonomy": []
+      }
+    },
+    {
+      "segment_id": "Quyen_dan_su/54::segment-0011::vi2en",
+      "A0": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 49,
+        "max_new_tokens": 448,
+        "ending": "nd supplemented in Clause 5 Article 1 of the Government’s Decrees No. 24/2019/ND",
+        "taxonomy": [
+          "E2",
+          "E3",
+          "E5",
+          "E6"
+        ]
+      },
+      "A1": {
+        "gen_finished_by_eos": true,
+        "reached_token_cap": false,
+        "generated_tokens": 201,
+        "max_new_tokens": 448,
+        "ending": ".” 7. Clause 5 Article 13 of the Decree No. 19/2011/ND-CP is amended as follows:",
+        "taxonomy": [
+          "E5"
+        ]
+      }
+    }
+  ],
+  "limitations": [
+    "Intentionally selected old predictions ending /ND; not random/full dev",
+    "Historical code hash; not submission promotion evidence",
+    "A1 still has language/entity/structure heuristic signals requiring review"
+  ]
+}
