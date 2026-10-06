@@ -113,6 +113,33 @@ class ResultsSubmissionTests(unittest.TestCase):
         self.assertEqual(output, source)
         self.assertGreater(report['translated_spans'], 1)
 
+    def test_context_mode_joins_only_hard_wrapped_prose_and_keeps_blocks(self):
+        source = ('1. The competent authority shall issue the certificate to the applicant\r\n'
+                  '   within five working days.\r\n\r\n'
+                  '## Separate heading\r\n\r\n'
+                  '| Name | Value |\r\n| --- | --- |\r\n| License | 12 |\r\n')
+        calls = []
+        def identity(texts):
+            calls.extend(texts)
+            return [[Candidate(t, reached_token_cap=False)] for t in texts]
+        output, report = translate_document(source, 'A', WordTokenizer(), identity, context_aware=True)
+        self.assertIn('1. The competent authority shall issue the certificate to the applicant within five working days.\r\n\r\n', output)
+        self.assertIn('## Separate heading\r\n', output)
+        self.assertIn('| Name | Value |\r\n| --- | --- |\r\n| License | 12 |\r\n', output)
+        self.assertEqual(report['merged_groups'], 1)
+        self.assertIn('The competent authority shall issue the certificate to the applicant within five working days.', calls)
+
+    def test_context_mode_does_not_send_inline_markdown_tokens_to_model(self):
+        source = 'The **competent authority** issues the [certificate](https://example.org).\n'
+        seen = []
+        def identity(texts):
+            seen.extend(texts)
+            return [[Candidate(t, reached_token_cap=False)] for t in texts]
+        output, report = translate_document(source, 'A', WordTokenizer(), identity, context_aware=True)
+        self.assertEqual(output, source)
+        self.assertFalse(any('**' in text or 'https://' in text or '[[PH' in text for text in seen))
+        self.assertEqual(report['merged_groups'], 0)
+
     def test_cap_triggers_smaller_split_and_empty_indivisible_span_fails(self):
         source = ' '.join('word'+str(i) for i in range(20))
         calls = []
@@ -147,6 +174,7 @@ class ResultsSubmissionTests(unittest.TestCase):
                 for i in range(50): writer.writerow({'sample_id':str(i), 'english_markdown':f'English document {i}', 'vietnamese_markdown':f'Vietnamese document {i}'})
             args = SimpleNamespace(input=path, phase='public', source_column=None, output_dir=root/'output',
                 batch_size=8, maximum_source_tokens=448, allow_cpu=True, smoke_documents=None, resume=False,
+                vi2en_context_lines=False,
                 en2vi_config=Path('submission/configs/en2vi.json'), vi2en_config=Path('submission/configs/vi2en.json'),
                 en2vi_model=root/'en', vi2en_model=root/'vi')
             with patch('torch.cuda.is_available', return_value=False), \
@@ -162,6 +190,39 @@ class ResultsSubmissionTests(unittest.TestCase):
                 self.assertEqual(report['rows'], 100)
                 self.assertEqual(Generator.calls, 101)  # 3 attempted, then 98 uncached documents.
                 self.assertEqual(validate_archive(args.output_dir/'submission.zip', load_test(path,'public'))['rows'], 100)
+
+    def test_full_run_can_reuse_only_validated_en2vi_rows(self):
+        from contextlib import redirect_stdout
+        from src.vinai_baseline.results_submission import build, read_archive_rows
+        class Model:
+            def to(self, **kwargs): return self
+        class Generator:
+            def __init__(self, *args): pass
+            def __call__(self, texts): return [[Candidate('NEW '+t, reached_token_cap=False)] for t in texts]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); path = root/'input.csv'
+            with path.open('w', encoding='utf-8', newline='') as handle:
+                writer = csv.DictWriter(handle, fieldnames=['sample_id','english_markdown','vietnamese_markdown'])
+                writer.writeheader()
+                for i in range(50): writer.writerow({'sample_id':str(i), 'english_markdown':f'English {i}', 'vietnamese_markdown':f'Vietnamese {i}'})
+            documents = load_test(path, 'public')
+            old_rows = [{'sample_id':d.sample_id, 'direction':d.direction,
+                         'translation':('LOCKED EN '+d.sample_id if d.direction=='en-vi' else 'OLD VI '+d.sample_id)} for d in documents]
+            old = root/'old'; write_submission(old_rows, documents, old)
+            args = SimpleNamespace(input=path, phase='public', source_column=None, output_dir=root/'new',
+                batch_size=8, maximum_source_tokens=448, allow_cpu=True, smoke_documents=None, resume=False,
+                vi2en_context_lines=True, reuse_en2vi_zip=old/'submission.zip',
+                en2vi_config=Path('submission/configs/en2vi.json'), vi2en_config=Path('submission/configs/vi2en.json'),
+                en2vi_model=None, vi2en_model=root/'vi')
+            with patch('torch.cuda.is_available', return_value=False), \
+                 patch('src.vinai_baseline.results_submission.model_identity', return_value={'weights':'fixed'}), \
+                 patch('src.vinai_baseline.inference.load_inference_model', return_value=(WordTokenizer(), Model())) as loader, \
+                 patch('src.vinai_baseline.results_submission.FrozenGenerator', Generator), redirect_stdout(io.StringIO()):
+                build(args)
+            self.assertEqual(loader.call_count, 1)
+            rows = read_archive_rows(args.output_dir/'submission.zip')
+            self.assertTrue(all(row['translation'].startswith('LOCKED EN ') for row in rows if row['direction']=='en-vi'))
+            self.assertTrue(all(row['translation'].startswith('NEW ') for row in rows if row['direction']=='vi-en'))
 
 
 if __name__ == '__main__': unittest.main()

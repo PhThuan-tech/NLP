@@ -117,7 +117,7 @@ def validate_rows(rows: Sequence[dict], documents: Sequence[TestDocument]) -> di
             "directions": {d: sum(row["direction"] == d for row in rows) for d in DIRECTIONS}}
 
 
-def validate_archive(path: Path, documents: Sequence[TestDocument]) -> dict:
+def read_archive_rows(path: Path) -> list[dict]:
     with zipfile.ZipFile(path) as archive:
         if archive.namelist() != ["results.csv"]:
             raise ValueError("The prediction ZIP must contain only results.csv at its root")
@@ -129,6 +129,11 @@ def validate_archive(path: Path, documents: Sequence[TestDocument]) -> dict:
         rows = [{"sample_id": r["sample_id"], "direction": r["direction"], "translation": r["prediction"]} for r in rows]
     elif columns != CSV_COLUMNS:
         raise ValueError("Invalid results.csv header (extra index/metadata columns are forbidden)")
+    return rows
+
+
+def validate_archive(path: Path, documents: Sequence[TestDocument]) -> dict:
+    rows = read_archive_rows(path)
     return {**validate_rows(rows, documents), "zip_sha256": file_hash(path)}
 
 
@@ -170,8 +175,11 @@ def official_metrics(rows: Sequence[dict], documents: Sequence[TestDocument]) ->
         references = [d.reference for d in subset]
         bleu = sacrebleu.metrics.BLEU(tokenize="13a", smooth_method="exp")
         chrf = sacrebleu.metrics.CHRF(char_order=6, word_order=0, beta=2)
-        result[direction] = {"documents": len(subset), "BLEU": bleu.corpus_score(hypotheses, [references]).score,
-                             "chrF": chrf.corpus_score(hypotheses, [references]).score,
+        bleu_score = bleu.corpus_score(hypotheses, [references])
+        chrf_score = chrf.corpus_score(hypotheses, [references])
+        result[direction] = {"documents": len(subset), "BLEU": bleu_score.score,
+                             "chrF": chrf_score.score, "brevity_penalty": bleu_score.bp,
+                             "hypothesis_tokens": bleu_score.sys_len, "reference_tokens": bleu_score.ref_len,
                              "signatures": {"BLEU": str(bleu.get_signature()), "chrF": str(chrf.get_signature())}}
     return {"status": "scored_full_documents", "sacrebleu_version": sacrebleu.__version__, "per_direction": result,
             "macro_average": {metric: sum(value[metric] for value in result.values()) / len(result) for metric in ("BLEU", "chrF")}}
@@ -200,31 +208,8 @@ def parse_legal_document(source: str, doc_id: str):
     return document
 
 
-def translate_document(source: str, doc_id: str, tokenizer, generate_many: Callable,
-                       *, source_budget: int = 448, hard_budget: int = 1024) -> tuple[str, dict]:
-    """Translate text spans; all original Markdown and inline syntax stays local."""
-    started = time.perf_counter()
-    document = parse_legal_document(source, doc_id)
-    inputs, recipes = [], []
-    for unit in document.units:
-        originals = {p.token: p.original for p in unit.placeholders}
-        pattern = "(" + "|".join(re.escape(t) for t in originals) + ")" if originals else None
-        parts = re.split(pattern, unit.src_masked) if pattern else [unit.src_masked]
-        recipe = []
-        for part in parts:
-            if part in originals:
-                recipe.append(("literal", originals[part])); continue
-            if not any(c.isalpha() for c in part):
-                recipe.append(("literal", part)); continue
-            left, right = len(part)-len(part.lstrip()), len(part.rstrip())
-            recipe.append(("literal", part[:left]))
-            pieces = split_unit(part[left:right], tokenizer, budget=source_budget, hard_budget=hard_budget)
-            for piece in pieces:
-                recipe.append(("literal", piece.separator_before))
-                recipe.append(("prediction", len(inputs)))
-                inputs.append(piece.text)
-            recipe.append(("literal", part[right:]))
-        recipes.append(recipe)
+def _generate_safe(inputs: Sequence[str], tokenizer, generate_many: Callable, *,
+                   source_budget: int, hard_budget: int, doc_id: str):
     outputs = generate_many(inputs) if inputs else []
     if len(outputs) != len(inputs):
         raise ValueError("Model output count differs from source text span count")
@@ -246,6 +231,143 @@ def translate_document(source: str, doc_id: str, tokenizer, generate_many: Calla
         diagnostics.append({"source_tokens": len(tokenizer(text, add_special_tokens=True, truncation=False)["input_ids"]),
                             "candidate": asdict(candidate)})
         selected.append(escape_generated(re.sub(r"[\r\n]+", " ", candidate.text.strip()), []))
+    return selected, repaired, diagnostics
+
+
+def _context_groups(document):
+    """Join source hard-wraps while retaining Markdown block boundaries."""
+    groups = []
+    continuable = {"paragraph", "preamble", "clause", "point", "list_item"}
+    for unit in document.units:
+        if not groups:
+            groups.append([unit]); continue
+        current = groups[-1]
+        previous = current[-1]
+        gap = document.source[previous.end:unit.start]
+        join = (
+            not any(item.placeholders for item in current)
+            and not unit.placeholders
+            and current[0].kind in continuable
+            and unit.kind == "paragraph"
+            and re.fullmatch(r"[ \t]*\r?\n[ \t]*", gap) is not None
+        )
+        if join: current.append(unit)
+        else: groups.append([unit])
+    return groups
+
+
+def _markdown_block_counts(text: str) -> dict[str, int]:
+    """Count line-level syntax without letting regex whitespace cross lines."""
+    patterns = {
+        "headings": r"^[ \t]{0,3}#{1,6}[ \t]+",
+        "unordered_lists": r"^[ \t]{0,3}[-+*][ \t]+",
+        "ordered_lists": r"^[ \t]{0,3}\d+[.)][ \t]+",
+        "blockquotes": r"^[ \t]{0,3}>[ \t]?",
+        "fences": r"^[ \t]{0,3}(?:`{3,}|~{3,})",
+    }
+    result = {name: len(re.findall(pattern, text, re.MULTILINE)) for name,pattern in patterns.items()}
+    result["table_lines"] = sum("|" in line for line in text.splitlines())
+    return result
+
+
+def translate_document(source: str, doc_id: str, tokenizer, generate_many: Callable,
+                       *, source_budget: int = 448, hard_budget: int = 1024,
+                       context_aware: bool = False) -> tuple[str, dict]:
+    """Translate text spans; all original Markdown and inline syntax stays local."""
+    started = time.perf_counter()
+    document = parse_legal_document(source, doc_id)
+    if context_aware:
+        groups = _context_groups(document)
+        inputs, plans = [], []
+        for group in groups:
+            if len(group) > 1:
+                joined = " ".join(unit.src_text.strip() for unit in group)
+                pieces = split_unit(joined, tokenizer, budget=source_budget, hard_budget=hard_budget)
+                indices = list(range(len(inputs), len(inputs)+len(pieces)))
+                inputs.extend(piece.text for piece in pieces)
+                plans.append({"start": group[0].start, "end": group[-1].end, "group": group,
+                              "pieces": pieces, "indices": indices, "recipe": None})
+                continue
+            unit = group[0]
+            originals = {p.token: p.original for p in unit.placeholders}
+            pattern = "(" + "|".join(re.escape(t) for t in originals) + ")" if originals else None
+            parts = re.split(pattern, unit.src_masked) if pattern else [unit.src_masked]
+            recipe = []
+            for part in parts:
+                if part in originals:
+                    recipe.append(("literal", originals[part])); continue
+                if not any(c.isalpha() for c in part):
+                    recipe.append(("literal", part)); continue
+                left, right = len(part)-len(part.lstrip()), len(part.rstrip())
+                recipe.append(("literal", part[:left]))
+                pieces = split_unit(part[left:right], tokenizer, budget=source_budget, hard_budget=hard_budget)
+                for piece in pieces:
+                    recipe.append(("literal", piece.separator_before))
+                    recipe.append(("prediction", len(inputs)))
+                    inputs.append(piece.text)
+                recipe.append(("literal", part[right:]))
+            plans.append({"start": unit.start, "end": unit.end, "group": group,
+                          "pieces": None, "indices": None, "recipe": recipe})
+        selected, repaired, diagnostics = _generate_safe(inputs, tokenizer, generate_many,
+            source_budget=source_budget, hard_budget=hard_budget, doc_id=doc_id)
+        replacements = []
+        for plan in plans:
+            if plan["recipe"] is None:
+                text = "".join(piece.separator_before+selected[index]
+                               for piece,index in zip(plan["pieces"],plan["indices"],strict=True))
+                strategy = "joined_source_hard_wraps"
+            else:
+                text = "".join(value if kind=="literal" else selected[value]
+                               for kind,value in plan["recipe"])
+                strategy = "source_offset_layout"
+            if not text.strip(): raise RuntimeError(f"Empty logical group in {doc_id}")
+            replacements.append((plan["start"], plan["end"], text))
+            for unit in plan["group"]:
+                unit.final = Candidate(text if unit is plan["group"][0] else "grouped-continuation",
+                                       strategy=strategy, restored=True)
+        rendered, previous = [], 0
+        for start,end,text in replacements:
+            if start < previous: raise RuntimeError("Overlapping context-aware replacements")
+            rendered.extend((source[previous:start], text)); previous=end
+        rendered.append(source[previous:]); output="".join(rendered)
+        source_structure, output_structure = _markdown_block_counts(source), _markdown_block_counts(output)
+        if source_structure != output_structure:
+            raise RuntimeError(f"Context-aware Markdown block counts changed in {doc_id}: "
+                               f"source={source_structure}, output={output_structure}")
+        base = coverage(document)
+        invariants = {**base, "final_units": len(document.units),
+                      "logical_groups": len(groups), "merged_groups": sum(len(g)>1 for g in groups)}
+        if not output.strip() or not invariants["round_trip"] or not invariants["unique_ordered_ids"]:
+            raise RuntimeError("Context-aware document coverage/empty-output check failed")
+        return output, {"units": len(document.units), "logical_groups": len(groups),
+                        "merged_groups": invariants["merged_groups"], "translated_spans": len(inputs),
+                        "split_after_cap": repaired, "invariants": invariants,
+                        "layout": "source_offset_context_v2; hard-wrapped prose translated jointly",
+                        "markdown_block_counts": output_structure,
+                        "static_blocks": [b for b in document.blocks if b["kind"] in {"code", "html", "front_matter"}],
+                        "runtime_seconds": time.perf_counter()-started, "generation": diagnostics}
+    inputs, recipes = [], []
+    for unit in document.units:
+        originals = {p.token: p.original for p in unit.placeholders}
+        pattern = "(" + "|".join(re.escape(t) for t in originals) + ")" if originals else None
+        parts = re.split(pattern, unit.src_masked) if pattern else [unit.src_masked]
+        recipe = []
+        for part in parts:
+            if part in originals:
+                recipe.append(("literal", originals[part])); continue
+            if not any(c.isalpha() for c in part):
+                recipe.append(("literal", part)); continue
+            left, right = len(part)-len(part.lstrip()), len(part.rstrip())
+            recipe.append(("literal", part[:left]))
+            pieces = split_unit(part[left:right], tokenizer, budget=source_budget, hard_budget=hard_budget)
+            for piece in pieces:
+                recipe.append(("literal", piece.separator_before))
+                recipe.append(("prediction", len(inputs)))
+                inputs.append(piece.text)
+            recipe.append(("literal", part[right:]))
+        recipes.append(recipe)
+    selected, repaired, diagnostics = _generate_safe(inputs, tokenizer, generate_many,
+        source_budget=source_budget, hard_budget=hard_budget, doc_id=doc_id)
     for unit, recipe in zip(document.units, recipes, strict=True):
         text = "".join(value if kind=="literal" else selected[value] for kind,value in recipe)
         unit.final = Candidate(text, strategy="source_offset_layout", restored=True)
@@ -311,6 +433,15 @@ def build(args):
     import torch
     from .inference import load_inference_model
     documents = load_test(args.input, args.phase, args.source_column, expected_documents=50 if args.phase=="public" else 100)
+    reused_rows = {}
+    reuse_en2vi = getattr(args, "reuse_en2vi_zip", None)
+    if reuse_en2vi is not None:
+        if args.phase != "public": raise ValueError("--reuse-en2vi-zip is supported only for the paired public phase")
+        validate_archive(reuse_en2vi, documents)
+        for row in read_archive_rows(reuse_en2vi):
+            if row["direction"] == "en-vi": reused_rows[row["sample_id"], row["direction"]] = row
+        expected_en2vi = sum(d.direction == "en-vi" for d in documents)
+        if len(reused_rows) != expected_en2vi: raise ValueError("Reusable archive does not contain every EN-to-VI public prediction")
     if args.batch_size < 1 or not 32 <= args.maximum_source_tokens <= 512:
         raise ValueError("batch-size must be positive; source budget must be in [32,512]")
     if not torch.cuda.is_available() and not args.allow_cpu:
@@ -326,6 +457,7 @@ def build(args):
     models, identities = {}, {}
     for direction in DIRECTIONS:
         if not any(d.direction == direction for d in documents): continue
+        if direction == "en-vi" and reused_rows: continue
         internal = DIRECTIONS[direction]
         config_path, adapter = getattr(args, internal+"_config"), getattr(args, internal+"_model")
         if adapter is None: raise ValueError(f"--{internal}-model is required for this phase")
@@ -343,8 +475,11 @@ def build(args):
         identities[direction] = identity
     provenance = {"schema_version": 1, "phase": args.phase, "input_sha256": file_hash(args.input), "source_column": args.source_column,
                   "code_sha256": code_version(), "models": identities, "batch_size": args.batch_size,
+                  "reused_en2vi_zip_sha256": file_hash(reuse_en2vi) if reuse_en2vi is not None else None,
                   "source_budget": args.maximum_source_tokens, "smoke_documents": args.smoke_documents,
-                  "layout": "source_offset_inline_spans_v1", "device": str(device),
+                  "layout": {"base": "source_offset_inline_spans_v1",
+                             "vi2en_context_lines": bool(getattr(args, "vi2en_context_lines", True))},
+                  "device": str(device),
                   "packages": {p: importlib.metadata.version(p) for p in ("torch", "transformers", "peft", "sacrebleu")}}
     signature = digest_json(provenance)
     manifest_path = output/"run_manifest.json"
@@ -355,7 +490,10 @@ def build(args):
         raise ValueError("Resume output has no matching run manifest")
     output.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps({"request_sha256": signature, **provenance}, indent=2), encoding="utf-8")
-    records, reports = {}, {}
+    records = dict(reused_rows)
+    reports = {(sample_id, direction): {"layout": "reused_validated_baseline_archive",
+                "source_zip_sha256": provenance["reused_en2vi_zip_sha256"]}
+               for sample_id,direction in reused_rows}
     for direction, (config, adapter) in models.items():
         needed = [d for d in documents if d.direction == direction]
         if args.smoke_documents is not None: needed = needed[:args.smoke_documents]
@@ -379,7 +517,9 @@ def build(args):
                         model.to(device=device, dtype=dtype)
                         generator = FrozenGenerator(tokenizer, model, config, identities[direction], device, args.batch_size)
                     print(f"DOCUMENT {direction} {index}/{len(needed)} {document.sample_id}", flush=True)
-                    translated, report = translate_document(document.source, document.sample_id, tokenizer, generator, source_budget=args.maximum_source_tokens)
+                    translated, report = translate_document(document.source, document.sample_id, tokenizer, generator,
+                        source_budget=args.maximum_source_tokens,
+                        context_aware=(direction == "vi-en" and bool(getattr(args, "vi2en_context_lines", True))))
                     row = {"sample_id": document.sample_id, "direction": document.direction, "translation": translated}
                     validate_rows([row], [document])
                     saved.parent.mkdir(parents=True, exist_ok=True)

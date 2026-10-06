@@ -4,12 +4,17 @@ Baseline dịch tài liệu pháp luật hai chiều **English → Vietnamese** 
 **Vietnamese → English**, xây dựng từ VinAI Translate v2, thích nghi miền bằng
 LoRA, đánh giá theo document/segment và chạy inference offline.
 
+**Thành viên mới:** đọc [Tutorial tinh chỉnh model và chạy Kaggle](docs/TUTORIAL_TEAM_KAGGLE.md)
+để hiểu phương pháp, nhận đúng artifact ngoài Git, tạo config riêng và bàn giao run.
+
 > Trạng thái: dataset v3, hai LoRA run và decoding sweep đã hoàn thành. Repo đã
 > có hai ZIP model đã train trong `modelAI/`. Theo hướng dẫn nộp CSV/ZIP mới được
 > cung cấp, dùng [notebook 06](notebooks/06_results_submission_kaggle.ipynb) để
 > tạo `submission.zip` chứa `results.csv` ở root, đủ 100 dòng. Xem
 > [hướng dẫn từng bước](docs/results_submission.md). Pipeline inference pháp lý
 > thử nghiệm vẫn tắt để chờ full-dev ablation và nghiệm thu.
+> Notebook hiện có VI→EN context v2: ghép các dòng văn xuôi bị hard-wrap và giữ
+> nguyên prediction EN→VI cũ nếu cung cấp submission ZIP đã xác thực.
 
 <a id="muc-luc"></a>
 ## Mục lục
@@ -27,6 +32,7 @@ LoRA, đánh giá theo document/segment và chạy inference offline.
 11. [Đóng gói submission](#submission)
 12. [Kiểm thử repository](#kiem-thu)
 13. [Pipeline inference pháp lý, không train lại](#inference-phap-ly)
+14. [Tutorial cho thành viên](docs/TUTORIAL_TEAM_KAGGLE.md)
 
 <a id="gioi-thieu"></a>
 ## 1. Giới thiệu cuộc thi
@@ -513,7 +519,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 python -m unittest discover -s tests -v
 ```
 
-Trạng thái ngày 05/10/2026: **127 tests chạy, 126 passed, 1 optional cached-tokenizer
+Trạng thái ngày 06/10/2026: **130 tests chạy, 129 passed, 1 optional cached-tokenizer
 integration test skipped**. Các test bao phủ data split/finalization, language control, config
 contract, quality gate, resume safety, document chunking, offline model resolution,
 submission service, merged-model validation, parser giữ byte nguồn, validator,
