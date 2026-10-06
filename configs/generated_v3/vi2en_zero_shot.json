@@ -1,0 +1,38 @@
+{
+  "run_name": "vinai_vi2en_zero_shot_legal_envi_clean_semantic_seed67_v3",
+  "direction": "vi2en",
+  "model_name": "vinai/vinai-translate-vi2en-v2",
+  "model_revision": "4eb2219d447d4352861e71e371a6b6abcb0509c8",
+  "output_dir": "outputs/legal_envi_clean_semantic_seed67_v3/vi2en/zero_shot",
+  "seed": 67,
+  "data": {
+    "dataset_id": "legal_envi_clean_semantic_seed67_v3",
+    "manifest_file": "artifacts/processed_clean_semantic_seed67_v3/manifest.json",
+    "train_file": "",
+    "validation_file": "artifacts/processed_clean_semantic_seed67_v3/segments_dev_vi2en.jsonl",
+    "max_source_length": 512,
+    "max_target_length": 512,
+    "overlength_policy": "error",
+    "audit_batch_size": 128
+  },
+  "generation": {
+    "num_beams": 2,
+    "max_length": 512,
+    "max_new_tokens": 448,
+    "length_penalty": 1.0,
+    "repetition_penalty": 1.0,
+    "no_repeat_ngram_size": 3,
+    "early_stopping": true,
+    "renormalize_logits": true
+  },
+  "training": {
+    "mode": "none",
+    "per_device_eval_batch_size": 16,
+    "gradient_checkpointing": false,
+    "fp16": true,
+    "bf16": false,
+    "require_cuda": true,
+    "eval_strategy": "no",
+    "save_strategy": "no"
+  }
+}

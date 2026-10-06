@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-05",
+  "status": "implemented_pending_full_spec_acceptance",
+  "unit_tests": {
+    "ran": 117,
+    "passed": 116,
+    "skipped": 1
+  },
+  "round_trip": {
+    "records": 2783,
+    "units": 14319,
+    "markup_units": 0,
+    "failures": [],
+    "round_trip_rate": 100.0
+  },
+  "actual_model_smoke": {
+    "status": "passed",
+    "device": "cpu",
+    "summary": {
+      "units": 2,
+      "OK": 2,
+      "RETRIED_FIXED": 0,
+      "RETRIED_UNFIXED": 0,
+      "SOURCE_KEPT": 0
+    },
+    "invariants": {
+      "round_trip": true,
+      "source_units": 2,
+      "final_units": 2,
+      "unique_ordered_ids": true,
+      "unit_coverage": true,
+      "partial_markup_lost_units": 0,
+      "legacy_marker_check": {
+        "source_counts": {
+          "headings": 1,
+          "unordered_list_items": 0,
+          "ordered_list_items": 1,
+          "blockquotes": 0,
+          "fenced_code_markers": 0,
+          "markdown_links": 0,
+          "tables": 0
+        },
+        "output_counts": {
+          "headings": 1,
+          "unordered_list_items": 0,
+          "ordered_list_items": 1,
+          "blockquotes": 0,
+          "fenced_code_markers": 0,
+          "markdown_links": 0,
+          "tables": 0
+        },
+        "structure_counts_match": true,
+        "mismatches": {}
+      },
+      "structure_preserved": true
+    },
+    "code_sha256": "fe78ac5308d3a6ebb76674bcfc5f7f5f3eb7dfe4a13a29f54457158dba5a551d"
+  },
+  "immutable_frozen_files_verified": 11,
+  "adapter_sha256": {
+    "en2vi": "197e92dde48a6deb9d2437906f990c816dc1708d1c6254ca33b7432a76aadec3",
+    "vi2en": "bca5c144efc084137379c0fb8774c9aea3c741781c687b0d972cfd9f756e3986"
+  },
+  "pending": [
+    "Full paired-dev decoding A/B",
+    "Full fixed-dev R0-R5",
+    "User glossary approval and 30-unit manual translation review",
+    "200 real-dev inline markup units for model placeholder survival; absent in frozen JSONL",
+    "Exact deployment GPU Docker smoke",
+    "Submission GPU/RAM/time budget"
+  ]
+}

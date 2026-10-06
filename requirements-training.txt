@@ -1,0 +1,10 @@
+-r requirements.txt
+
+# VinAI baseline training/evaluation stack. The code uses the Transformers v5
+# direct AutoModel API (not the removed translation pipeline).
+transformers>=5.17,<6
+accelerate>=1.10,<2
+peft>=0.21,<0.22
+sacrebleu>=2.5,<3
+sentencepiece>=0.2,<1
+protobuf>=5,<7

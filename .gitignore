@@ -1,7 +1,37 @@
-data/
+/data/*
+!/data/instruction.md
 NLP_venv
+.venv/
+.test-deps/
+venv/
 __pycache__/
 *.py[cod]
+KEEP_*.zip
+NLP_colab.zip
+VLSP2026_MT_build_context.zip
+VLSP2026_MT_build_context.zip.md5
+dist/
+submission/models/en2vi/
+submission/models/vi2en/
 
 # Generated intermediate data; keep local and do not upload to Git.
 artifacts/processed/
+artifacts/processed_token*_parent/
+artifacts/processed_semantic_audit*/
+artifacts/semantic_audit_seed67_v3/
+artifacts/processed_clean_semantic_seed67_v3/
+
+# Local training outputs and model caches.
+outputs/
+checkpoints/
+.cache/
+wandb/
+offline_training_assets/
+*.zip
+results_model_sweep_testset/
+
+# Generated inference predictions and evaluation workspaces (retain locally).
+reports/inference_pipeline/**/*.jsonl
+reports/inference_pipeline/evaluation/
+reports/inference_pipeline/workspace/
+reports/results_submission/smoke/
