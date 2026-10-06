@@ -19,6 +19,10 @@ def main():
         parser.add_argument(f"--{direction}-model", type=Path, help="Saved best_model adapter or merged model directory")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--maximum-source-tokens", type=int, default=448)
+    parser.add_argument("--vi2en-context-lines", action=argparse.BooleanOptionalAction, default=True,
+                        help="Join VI-to-EN prose lines split only by source hard wrapping")
+    parser.add_argument("--reuse-en2vi-zip", type=Path,
+                        help="Validated previous 100-row public submission; reuse only its EN-to-VI rows")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--allow-cpu", action="store_true")
     parser.add_argument("--smoke-documents", type=int, help="Documents per direction; smoke never creates a submission ZIP")

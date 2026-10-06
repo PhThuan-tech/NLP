@@ -34,6 +34,11 @@ Add Input gồm:
 | `offline_training_assets/vinai-translate-vi2en-v2.zip` | Base VI→EN offline đã dùng khi train |
 | `offline_training_assets/vinai-training-wheelhouse-py313-linux.zip` | Thư viện Linux Python 3.13 offline |
 
+Để chỉ chạy lại VI→EN, giữ ZIP submission đã nộp ở
+`/kaggle/working/results_submission/results_public/submission.zip`, hoặc upload nó
+làm một Kaggle Input có tên `submission.zip`. Notebook xác thực đủ 100 key rồi chỉ
+lấy 50 dòng EN→VI; 50 dòng VI→EN cũ không được tái sử dụng.
+
 Nếu ba asset offline cuối đã nằm trong Kaggle Dataset, thêm lại các Input đó;
 không cần upload lần nữa. Có thể dùng thư mục đã giải nén thay cho ZIP.
 Base snapshot phải có `offline_model_manifest.json` đúng repo/revision/SHA256.
@@ -46,15 +51,18 @@ Không cần LaBSE hoặc `NLP_v3_frozen.zip` cho bước dịch bài nộp.
 3. Chạy các cell theo thứ tự từ đầu, trong session mới.
 4. Giữ `PHASE='public'`, `SOURCE_COLUMN=None`, `BATCH_SIZE=8`.
 5. Giữ `RUN_FULL=True`; smoke một tài liệu mỗi chiều là tùy chọn.
-6. Chờ log lần lượt `DOCUMENT en-vi ...`, `DOCUMENT vi-en ...`; mỗi tài liệu
-   hoàn thành được lưu riêng. Không có bước train, preflight training hoặc sweep.
+6. Bản context v2 tự tìm submission cũ hợp lệ. Nếu có, nó khóa nguyên 50 output
+   EN→VI và chỉ sinh lại VI→EN; nếu không có thì sinh cả hai chiều. Chờ log
+   `DOCUMENT ...`; mỗi tài liệu hoàn thành được lưu riêng. Không có bước train,
+   preflight training hoặc sweep.
 7. Cell cuối phải báo `status: passed`, `rows: 100`, mỗi chiều 50 dòng.
-8. Tải **`/kaggle/working/results_submission/results_public/submission.zip`**.
+8. Tải **`/kaggle/working/results_submission/results_public_context_v2/submission.zip`**.
    Upload chính file này lên trang chấm. Có thể tải thêm `evaluation_report.json`
    và `results.csv` để lưu và đọc bản dịch; report không nằm trong ZIP bài nộp.
 
 Thời gian phụ thuộc GPU và chiều dài nguồn. Notebook không cung cấp ước lượng
-chưa đo. Nếu session bị ngắt, giữ thư mục output và chạy lại cell full với cùng
+chưa đo. Output cải tiến mặc định nằm trong `results_public_context_v2`. Nếu
+session bị ngắt, giữ thư mục output và chạy lại cell full với cùng
 Input/model/config/code/batch size: tài liệu đã xong được đọc từ cache đã kiểm
 checksum. Nếu Kaggle mất `/kaggle/working`, cần giữ bản backup thư mục output;
 cache không tự tồn tại qua session bị xóa. Nếu OOM, đổi `BATCH_SIZE=4` và chọn
@@ -73,7 +81,18 @@ Sử dụng hai adapter đã chốt, base revision cố định và config trong
 | EN→VI | 2 | 1.1 | 512 |
 | VI→EN | 4 | 1.1 | 512 |
 
-Không bật glossary hoặc các nhánh pipeline thử nghiệm chưa có bằng chứng full-dev.
+Context v2 chỉ bật cho VI→EN: các dòng văn xuôi liên tiếp do hard-wrap được ghép
+thành câu/đoạn trước khi dịch; heading, list, table, blockquote và code vẫn giữ
+ranh giới riêng. Trên 50 nguồn public, preflight giảm 29.004 source units thành
+14.569 logical groups, gồm 6.924 nhóm ghép, và giữ nguyên toàn bộ block counts.
+Một smoke model thật biến hai dòng “Căn cứ Nghị định ... chức năng, nhiệm vụ,
+quyền hạn / và cơ cấu tổ chức ...” thành một câu tiếng Anh hoàn chỉnh thay vì hai
+mảnh độc lập. Đây là thay đổi tổng quát theo cấu trúc nguồn, không lấy reference
+public để sửa câu hay thuật ngữ.
+
+Không bật glossary vì `submission/resources/glossary.csv` hiện chưa có entry
+`approved`; tự động dùng các candidate pending có thể thay sai thuật ngữ. Không
+bật các nhánh pipeline thử nghiệm chưa có bằng chứng full-dev.
 Không dùng điểm public/private để chọn lại checkpoint, decoding hoặc thuật ngữ.
 
 Đầu vào là **toàn bộ CSV public gốc**, không phải các segment v3 đã lọc semantic.

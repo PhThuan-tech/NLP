@@ -23,7 +23,8 @@ def main():
     4. `vinai-training-wheelhouse-py313-linux.zip` hoặc thư mục wheel offline đã dùng khi train.
 
     Không cần LaBSE, dataset frozen hoặc chạy lại train/sweep. Dịch toàn bộ nguồn gốc;
-    giữ cấu trúc Markdown bằng vị trí văn bản. Không bật glossary/pipeline thử nghiệm.
+    giữ cấu trúc Markdown bằng vị trí văn bản. Bản context v2 giữ nguyên EN→VI,
+    nhưng ghép các dòng VI→EN bị hard-wrap để model nhận đủ ngữ cảnh câu.
     Output cuối **`submission.zip` chỉ chứa `results.csv`**, đủ 100 dòng.
     ZIP project ở bước 1 là Input cho notebook; file đó không phải bài nộp.
     ''')
@@ -163,25 +164,42 @@ def main():
     INPUT_CSV = PROJECT_DIR/'data/test/en-vi-public_test.csv'
     SOURCE_COLUMN = None
     BATCH_SIZE = 8  # Nếu OOM, dùng 4 và chọn RUN_DIR mới vì thay đổi batch ảnh hưởng provenance.
-    RUN_DIR = WORKING_ROOT/f'results_{PHASE}'
-    from src.vinai_baseline.results_submission import load_test
+    RUN_DIR = WORKING_ROOT/f'results_{PHASE}_context_v2'
+    from src.vinai_baseline.results_submission import load_test, validate_archive
     documents = load_test(INPUT_CSV, PHASE, SOURCE_COLUMN, expected_documents=50 if PHASE=='public' else 100)
     print('Expected prediction rows:', len(documents))
     print('Per direction:', {d: sum(item.direction==d for item in documents) for d in ('en-vi', 'vi-en')})
     subprocess.run([sys.executable, '-m', 'unittest', 'tests.test_results_submission', '-q'], cwd=PROJECT_DIR, check=True)
+    # Reuse the strong, already submitted EN-to-VI predictions when available.
+    # The archive is validated against all 100 required public keys before reuse.
+    REUSE_EN2VI_ZIP = None
+    if PHASE == 'public':
+        previous = WORKING_ROOT/'results_public'/'submission.zip'
+        candidates = [previous] if previous.is_file() else list(INPUT_ROOT.rglob('submission.zip'))
+        valid = []
+        for candidate in candidates:
+            try:
+                if validate_archive(candidate, documents)['rows'] == 100: valid.append(candidate)
+            except Exception:
+                pass
+        if len(valid) == 1: REUSE_EN2VI_ZIP = valid[0]
+        elif len(valid) > 1: raise ValueError(f'Nhiều baseline submission ZIP hợp lệ; chọn thủ công một file: {valid}')
+    print('Reuse locked EN-to-VI:', REUSE_EN2VI_ZIP or 'không có; sẽ sinh lại cả hai chiều')
     def command(output, *extra):
         result = [sys.executable, '-u', str(PROJECT_DIR/'scripts/build_results_submission.py'),
                   '--input', str(INPUT_CSV), '--phase', PHASE, '--output-dir', str(output),
                   '--en2vi-model', str(ADAPTER_DIRS['en2vi']), '--vi2en-model', str(ADAPTER_DIRS['vi2en']),
                   '--batch-size', str(BATCH_SIZE), '--resume', *extra]
         if SOURCE_COLUMN is not None: result += ['--source-column', SOURCE_COLUMN]
+        if REUSE_EN2VI_ZIP is not None: result += ['--reuse-en2vi-zip', str(REUSE_EN2VI_ZIP)]
         return result
     ''')
     markdown('''
     ## 4. Smoke tùy chọn và dịch đủ test
 
     `RUN_SMOKE=True` chỉ kiểm tra một tài liệu mỗi chiều; không tạo ZIP bài nộp.
-    Full run chạy lần lượt EN→VI rồi VI→EN. Có log batch và lưu từng tài liệu.
+    Nếu tìm thấy submission cũ, full run giữ nguyên 50 output EN→VI và chỉ chạy
+    VI→EN context v2; nếu không, nó chạy lần lượt cả hai chiều. Có log batch và lưu từng tài liệu.
     Nếu bị ngắt, chạy lại cell full với cùng `RUN_DIR`, Input và cấu hình để tiếp tục.
     Khi đổi model/code/Input/config, chọn `RUN_DIR` mới. Không chạy train hoặc sweep.
     ''')
