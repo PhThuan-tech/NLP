@@ -2,12 +2,14 @@
 
 Baseline dịch tài liệu pháp luật hai chiều **English → Vietnamese** và
 **Vietnamese → English**, xây dựng từ VinAI Translate v2, thích nghi miền bằng
-LoRA, đánh giá theo document/segment và triển khai dưới dạng Docker chạy offline.
+LoRA, đánh giá theo document/segment và chạy inference offline.
 
 > Trạng thái: dataset v3, hai LoRA run và decoding sweep đã hoàn thành. Repo đã
-> có hai ZIP model đã train trong `modelAI/`; bước merge và kiểm thử Docker cuối
-> vẫn cần thực hiện. Pipeline inference pháp lý mới đã có code và notebook offline,
-> đang tắt trong submission để chờ full-dev ablation và nghiệm thu.
+> có hai ZIP model đã train trong `modelAI/`. Theo hướng dẫn nộp CSV/ZIP mới được
+> cung cấp, dùng [notebook 06](notebooks/06_results_submission_kaggle.ipynb) để
+> tạo `submission.zip` chứa `results.csv` ở root, đủ 100 dòng. Xem
+> [hướng dẫn từng bước](docs/results_submission.md). Pipeline inference pháp lý
+> thử nghiệm vẫn tắt để chờ full-dev ablation và nghiệm thu.
 
 <a id="muc-luc"></a>
 ## Mục lục
@@ -45,10 +47,11 @@ Các ràng buộc chính:
 - inference phải chạy local, không gọi API/dịch vụ online;
 - private test chỉ có tài liệu nguồn, reference được giữ kín;
 - input và output là tài liệu Markdown UTF-8 hoàn chỉnh;
-- bài nộp là Docker image self-contained chạy offline, kèm Bash wrapper nhận
-  đúng ba tham số: `host:port/path`, input file và output file;
-- đánh giá gồm metric tự động, đánh giá bằng LLM, độ đúng/nhất quán pháp lý,
-  thời gian inference và peak memory.
+- phase CSV theo hướng dẫn mới: upload một ZIP chứa `results.csv` ở root,
+  ba cột `sample_id,direction,translation`, đủ 100 dòng;
+- metric của phase này: corpus BLEU (13a, exponential smoothing), chrF
+  (character order 6, beta 2), tính riêng hai chiều rồi macro-average;
+- repo cũng giữ Docker offline và Bash wrapper ba tham số cho protocol service.
 
 Các mốc đang công bố: training data `18/09/2026`, public test `25/09/2026`,
 private test `09/10/2026`, công bố kết quả `15/10/2026`.
@@ -98,7 +101,7 @@ Base VinAI đã pin revision
         │
         ├── Đánh giá cấu hình đã chốt trên public test
         │
-        └── Merge adapter → Docker offline → private test
+        └── Dịch nguồn test gốc → results.csv → submission.zip (100 dòng)
 ```
 
 Quality gate phát hiện output rỗng, sai ngôn ngữ, lặp/collapse, độ dài bất thường
@@ -408,6 +411,12 @@ cũng cho thấy rủi ro thật với dấu thập phân và cấu trúc nhiề
 <a id="test"></a>
 ## 10. Public test và private test
 
+**Phase CSV/ZIP hiện tại:** dùng [quy trình results.csv](docs/results_submission.md)
+và notebook 06. Public dịch 50 tài liệu gốc theo cả hai chiều; private dịch 100
+tài liệu theo direction được cung cấp. Không tạo bài nộp bằng cách ghép prediction
+segment v3 đã bị lọc. Điểm mới dùng **chrF**, khác chrF++ trong bảng thực nghiệm.
+Các hướng dẫn service Docker dưới đây dành cho protocol dịch file riêng.
+
 ### 10.1 Khi public test có reference
 
 Có thể tính BLEU, chrF++, number/reference/legal-ID F1 và quality gate. Chỉ so sánh
@@ -459,7 +468,18 @@ Chạy lại với external network bị tắt và kiểm tra log không có req
 <a id="submission"></a>
 ## 11. Đóng gói submission
 
-### 11.1 Merge hai adapter và tạo build context
+### 11.1 Bài nộp CSV/ZIP — quy trình hiện tại
+
+1. Upload `dist/NLP_results_submission_kaggle.zip` làm Kaggle Input, cùng hai base
+   snapshot và wheelhouse offline đã dùng khi train.
+2. Import `notebooks/06_results_submission_kaggle.ipynb`; bật GPU, Internet OFF.
+3. Chạy theo thứ tự để dịch nguồn test đầy đủ bằng hai adapter/config đã chốt.
+4. Tải `results_public/submission.zip` từ output, sau khi cell cuối báo đủ 100 dòng.
+   Đây là file upload lên trang chấm; ZIP project/model không phải bài nộp.
+
+Hướng dẫn Input, resume, metric và private: [docs/results_submission.md](docs/results_submission.md).
+
+### 11.2 Merge hai adapter cho protocol Docker
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/prepare_submission.ps1 `
@@ -472,15 +492,16 @@ powershell -ExecutionPolicy Bypass -File scripts/prepare_submission.ps1 `
 Script chạy offline, merge LoRA, kiểm tra model/revision/SHA-256, đếm tham số từ
 safetensors và tạo `dist/VLSP2026_MT_build_context.zip` cùng MD5.
 
-### 11.2 Build, kiểm tra và export
+### 11.3 Build, kiểm tra và export Docker
 
 ```bash
 docker build -f submission/Dockerfile -t vlsp2026-legal-mt:latest .
 bash submission/export_image.sh vlsp2026-legal-mt:latest dist
 ```
 
-Upload `vlsp2026_legal_mt_submission.tar.gz` và file `.md5` lên cloud với quyền tải
-không cần đăng nhập. Tải lại rồi kiểm tra cả MD5 ngoài và `MD5SUMS` bên trong.
+Nếu ban tổ chức yêu cầu protocol service, dùng `vlsp2026_legal_mt_submission.tar.gz`
+và file `.md5`, kiểm tra cả MD5 ngoài và `MD5SUMS` bên trong. Với phase CSV/ZIP
+vừa cung cấp, upload `submission.zip` theo mục 11.1.
 
 Checklist cuối: `submission/READINESS_CHECKLIST.md`.
 
@@ -492,7 +513,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 python -m unittest discover -s tests -v
 ```
 
-Trạng thái ngày 05/10/2026: **117 tests chạy, 116 passed, 1 optional cached-tokenizer
+Trạng thái ngày 05/10/2026: **127 tests chạy, 126 passed, 1 optional cached-tokenizer
 integration test skipped**. Các test bao phủ data split/finalization, language control, config
 contract, quality gate, resume safety, document chunking, offline model resolution,
 submission service, merged-model validation, parser giữ byte nguồn, validator,

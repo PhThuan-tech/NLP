@@ -34,3 +34,4 @@ results_model_sweep_testset/
 reports/inference_pipeline/**/*.jsonl
 reports/inference_pipeline/evaluation/
 reports/inference_pipeline/workspace/
+reports/results_submission/smoke/

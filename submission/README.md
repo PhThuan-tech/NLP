@@ -1,5 +1,11 @@
 # VLSP 2026 Legal MT submission
 
+**Phase CSV/ZIP theo hướng dẫn ngày 05/10/2026:** dùng
+[notebook 06](../notebooks/06_results_submission_kaggle.ipynb) và
+[hướng dẫn results.csv](../docs/results_submission.md) để tạo `submission.zip`
+chứa duy nhất `results.csv` ở root, đủ 100 dòng. Các bước Docker bên dưới dành
+cho protocol service; không upload image/model/project ZIP lên phase CSV này.
+
 Thư mục này chứa lớp triển khai cho cả EN→VI và VI→EN. Docker image dùng merged
 models local, bật chế độ Hugging Face/Transformers offline và không gọi API ngoài.
 
