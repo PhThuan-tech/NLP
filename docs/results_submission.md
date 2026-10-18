@@ -129,6 +129,34 @@ Không so trực tiếp điểm segment đã lọc với điểm toàn tài li�
 
 ## 6. Khi nhận Private Test
 
+Private input thực tế ngày 11/10 có các cột
+`sample_id,category,source_language,source_markdown`, gồm 50 nguồn `en` và 50
+nguồn `vi`. Loader chuyển `en` thành `en-vi`, `vi` thành `vi-en`; giữ nguyên ID,
+nguồn và thứ tự dòng. Nếu có cả `direction` và `source_language`, chúng phải
+khớp nhau.
+
+Với hai model đã merge trong `modelAI/`, dùng
+`notebooks/07_private_test_merged_kaggle.ipynb`. Bật GPU, Internet OFF, thêm đúng
+một project bundle `dist/NLP_results_submission_kaggle_private_merged.zip`,
+hai ZIP `modelAI/en2vi_merged.zip`, `modelAI/vi2en_merged.zip` và wheelhouse
+`offline_training_assets/vinai-training-wheelhouse-py313-linux.zip`.
+Bundle đã chứa private CSV; không cần hai base model ZIP hoặc adapter riêng.
+Chạy Run All trong session mới. File nộp được tạo sau khi dịch đủ 100 tài liệu:
+`/kaggle/working/results_submission/results_private_context_v2/submission.zip`.
+Project bundle là input chạy inference, không phải file upload lên trang chấm.
+
+Tái tạo gói (chọn tên output mới nếu gói đã tồn tại):
+
+```powershell
+.\.venv\Scripts\python.exe scripts/prepare_private_test.py `
+  --input C:\Users\Asus\Downloads\private_test_input.csv `
+  --output dist/NLP_results_submission_kaggle_private_merged.zip
+```
+
+Script kiểm tra schema, Markdown và SHA256 từng file của hai merged models;
+nó không chạy model hoặc tạo prediction. Phần bên dưới dành cho notebook 06
+dùng adapter và base snapshot riêng.
+
 Trong notebook đổi:
 
 ```python
@@ -138,10 +166,10 @@ SOURCE_COLUMN = 'source'  # thay bằng đúng tên cột văn bản nguồn n�
 RUN_DIR = WORKING_ROOT/'results_private'
 ```
 
-Đầu vào phải có `sample_id`, `direction` và cột nguồn. Code có thể tự nhận đúng
+Đầu vào phải có `sample_id`, `direction` hoặc `source_language`, và cột nguồn. Code có thể tự nhận đúng
 một trong `source`, `source_markdown`, `text`, `markdown`, `input`; nếu schema khác
 hoặc có nhiều cột ứng viên, chỉ rõ `SOURCE_COLUMN`. Giữ nguyên direction được
-cung cấp. Schema private thực tế chưa được phát hành; cần đối chiếu file khi có.
+cung cấp; nếu chỉ có `source_language`, dùng ánh xạ hai ngôn ngữ ở trên.
 Chạy cell chọn phase và full lại, không reuse cache public. File nộp là
 `results_private/submission.zip`, đủ 100 dòng theo chiều trong private input.
 

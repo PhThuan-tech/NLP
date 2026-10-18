@@ -20,6 +20,26 @@ class WordTokenizer:
 
 
 class ResultsSubmissionTests(unittest.TestCase):
+    def test_private_source_language_schema_and_conflicting_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/"private.csv"
+            source = '# Heading\r\nText, "quoted"\r\n'
+            with path.open('w', encoding='utf-8', newline='') as handle:
+                writer = csv.DictWriter(handle, fieldnames=['sample_id', 'category', 'source_language', 'source_markdown'])
+                writer.writeheader()
+                for sample_id, language in [('Law/001', 'en'), ('Law/002', 'vi')]:
+                    writer.writerow(dict(sample_id=sample_id, category='Law', source_language=language, source_markdown=source))
+            documents = load_test(path, 'private', expected_documents=2)
+            self.assertEqual([d.direction for d in documents], ['en-vi', 'vi-en'])
+            self.assertEqual([d.source for d in documents], [source, source])
+            self.assertTrue(all(d.reference is None for d in documents))
+            path.write_text('sample_id,source_language,source\nA,fr,Text\n', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'source_language'):
+                load_test(path, 'private', expected_documents=1)
+            path.write_text('sample_id,direction,source_language,source\nA,vi-en,en,Text\n', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'conflicts'):
+                load_test(path, 'private', expected_documents=1)
+
     def test_public_sources_generate_both_directions_without_changing_ids(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/"input.csv"

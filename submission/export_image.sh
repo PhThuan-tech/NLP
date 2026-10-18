@@ -12,13 +12,14 @@ docker image inspect "${IMAGE_TAG}" >/dev/null
 docker save "${IMAGE_TAG}" | gzip -n > "${OUTPUT_DIR}/${ARCHIVE_NAME}"
 cp submission/translate.sh "${OUTPUT_DIR}/translate.sh"
 cp submission/README.md "${OUTPUT_DIR}/README.md"
+cp submission/METHOD_DESCRIPTION.md "${OUTPUT_DIR}/METHOD_DESCRIPTION.md"
 chmod +x "${OUTPUT_DIR}/translate.sh"
 
 (
   cd "${OUTPUT_DIR}"
-  md5sum "${ARCHIVE_NAME}" translate.sh README.md > MD5SUMS
+  md5sum "${ARCHIVE_NAME}" translate.sh README.md METHOD_DESCRIPTION.md > MD5SUMS
   tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-    -czf "${RELEASE_NAME}" "${ARCHIVE_NAME}" translate.sh README.md MD5SUMS
+    -czf "${RELEASE_NAME}" "${ARCHIVE_NAME}" translate.sh README.md METHOD_DESCRIPTION.md MD5SUMS
   md5sum "${RELEASE_NAME}" > "${RELEASE_NAME}.md5"
 )
 

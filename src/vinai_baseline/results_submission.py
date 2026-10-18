@@ -74,8 +74,8 @@ def load_test(path: Path, phase: str, source_column: str | None = None,
                 TestDocument(row["sample_id"], "vi-en", row["vietnamese_markdown"], row["english_markdown"]),
             ])
     elif phase == "private":
-        if "direction" not in columns:
-            raise ValueError("Private input requires its supplied direction column")
+        if not {"direction", "source_language"}.intersection(columns):
+            raise ValueError("Private input requires direction or source_language")
         if source_column is None:
             choices = [name for name in ("source", "source_markdown", "text", "markdown", "input") if name in columns]
             if len(choices) != 1:
@@ -84,9 +84,17 @@ def load_test(path: Path, phase: str, source_column: str | None = None,
         if source_column not in columns:
             raise ValueError(f"Source column does not exist: {source_column}")
         for row in rows:
-            if row["direction"] not in DIRECTIONS:
-                raise ValueError(f"Invalid supplied direction: {row['direction']!r}; expected en-vi or vi-en")
-            documents.append(TestDocument(row["sample_id"], row["direction"], row[source_column]))
+            language_direction = None
+            if "source_language" in columns:
+                language_direction = {"en": "en-vi", "vi": "vi-en"}.get(row["source_language"])
+                if language_direction is None:
+                    raise ValueError(f"Invalid source_language: {row['source_language']!r}; expected en or vi")
+            direction = row["direction"] if "direction" in columns else language_direction
+            if direction not in DIRECTIONS:
+                raise ValueError(f"Invalid supplied direction: {direction!r}; expected en-vi or vi-en")
+            if language_direction is not None and direction != language_direction:
+                raise ValueError("Private direction conflicts with source_language")
+            documents.append(TestDocument(row["sample_id"], direction, row[source_column]))
     else:
         raise ValueError("phase must be public or private")
     if any(not document.source.strip() for document in documents):
