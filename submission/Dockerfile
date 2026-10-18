@@ -15,12 +15,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VINAI_VI2EN_CONFIG=/app/configs/vi2en.json \
     VINAI_PIPELINE_CONFIG=/app/configs/inference_pipeline.json \
     VINAI_EN2VI_MODEL_DIR=/models/en2vi \
-    VINAI_VI2EN_MODEL_DIR=/models/vi2en
+    VINAI_VI2EN_MODEL_DIR=/models/vi2en \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app
 
 COPY submission/requirements-inference.txt /tmp/requirements-inference.txt
-RUN python -m pip install --no-cache-dir -r /tmp/requirements-inference.txt \
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends python3.12-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/bin/python -m venv --system-site-packages "$VIRTUAL_ENV" \
+    && "$VIRTUAL_ENV/bin/python" -m pip install --no-cache-dir -r /tmp/requirements-inference.txt \
     && rm /tmp/requirements-inference.txt
 
 COPY src /app/src

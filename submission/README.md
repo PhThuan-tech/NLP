@@ -89,7 +89,7 @@ bash submission/export_image.sh vlsp2026-legal-mt:latest dist
 ```
 
 File nộp chính là `dist/vlsp2026_legal_mt_submission.tar.gz`; nó chứa image
-archive, `translate.sh`, README và `MD5SUMS`. File
+archive, `translate.sh`, README, `METHOD_DESCRIPTION.md` và `MD5SUMS`. File
 `vlsp2026_legal_mt_submission.tar.gz.md5` dùng để kiểm tra gói sau khi tải lại:
 
 ```bash
